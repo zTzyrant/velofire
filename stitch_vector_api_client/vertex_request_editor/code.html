@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Vertex API Client</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 20;
+            font-size: 18px;
+        }
+        ::-webkit-scrollbar { width: 4px; height: 4px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #424754; border-radius: 10px; }
+        ::-webkit-scrollbar-thumb:hover { background: #8c909f; }
+        .editor-bg { background-color: #0d0d0d; }
+    </style>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "primary-container": "#4d8eff",
+                        "surface-container-lowest": "#0b0e15",
+                        "surface-variant": "#32353c",
+                        "inverse-on-surface": "#2e3038",
+                        "on-tertiary-fixed-variant": "#723600",
+                        "on-surface": "#e1e2ec",
+                        "primary": "#adc6ff",
+                        "inverse-surface": "#e1e2ec",
+                        "primary-fixed-dim": "#adc6ff",
+                        "surface-bright": "#363941",
+                        "surface-dim": "#10131a",
+                        "tertiary-fixed-dim": "#ffb786",
+                        "on-background": "#e1e2ec",
+                        "tertiary": "#ffb786",
+                        "on-primary-fixed": "#001a42",
+                        "on-tertiary-fixed": "#311400",
+                        "surface-tint": "#adc6ff",
+                        "background": "#10131a",
+                        "tertiary-fixed": "#ffdcc6",
+                        "error": "#ffb4ab",
+                        "secondary-container": "#4a4949",
+                        "outline-variant": "#424754",
+                        "on-primary": "#002e6a",
+                        "surface-container": "#1d2027",
+                        "on-primary-container": "#00285d",
+                        "on-surface-variant": "#c2c6d6",
+                        "outline": "#8c909f",
+                        "error-container": "#93000a",
+                        "tertiary-container": "#df7412",
+                        "surface-container-highest": "#32353c",
+                        "on-error": "#690005",
+                        "primary-fixed": "#d8e2ff",
+                        "on-tertiary": "#502400",
+                        "on-secondary-container": "#bab8b7",
+                        "surface": "#10131a",
+                        "on-tertiary-container": "#461f00",
+                        "surface-container-low": "#191b23",
+                        "secondary": "#c8c6c5",
+                        "on-error-container": "#ffdad6",
+                        "on-secondary-fixed-variant": "#474646",
+                        "on-primary-fixed-variant": "#004395",
+                        "inverse-primary": "#005ac2",
+                        "secondary-fixed-dim": "#c8c6c5",
+                        "on-secondary-fixed": "#1c1b1b",
+                        "secondary-fixed": "#e5e2e1",
+                        "on-secondary": "#313030",
+                        "surface-container-high": "#272a31"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.375rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "full": "9999px"
+                    },
+                    "spacing": {
+                        "md": "12px",
+                        "xl": "24px",
+                        "gutter": "1px",
+                        "sm": "8px",
+                        "xs": "4px",
+                        "unit": "4px",
+                        "lg": "16px"
+                    },
+                    "fontFamily": {
+                        "label-xs": ["Inter"],
+                        "body-sm": ["Inter"],
+                        "code-md": ["JetBrains Mono"],
+                        "body-md": ["Inter"],
+                        "code-sm": ["JetBrains Mono"],
+                        "headline-sm": ["Inter"]
+                    },
+                    "fontSize": {
+                        "label-xs": ["11px", {"lineHeight": "16px", "letterSpacing": "0.02em", "fontWeight": "500"}],
+                        "body-sm": ["12px", {"lineHeight": "18px", "fontWeight": "400"}],
+                        "code-md": ["13px", {"lineHeight": "20px", "fontWeight": "400"}],
+                        "body-md": ["13px", {"lineHeight": "20px", "fontWeight": "400"}],
+                        "code-sm": ["12px", {"lineHeight": "18px", "fontWeight": "400"}],
+                        "headline-sm": ["16px", {"lineHeight": "24px", "letterSpacing": "-0.01em", "fontWeight": "600"}]
+                    }
+                },
+            },
+        }
+    </script>
+</head>
+<body class="bg-background text-on-surface font-body-md text-body-md overflow-hidden selection:bg-primary/30">
+<!-- Main App Container -->
+<div class="flex flex-col h-screen w-full">
+<!-- TopNavBar (Shared Component) -->
+<header class="flex justify-between items-center px-md w-full bg-surface-container h-12 border-b border-outline-variant shrink-0">
+<div class="flex items-center gap-lg">
+<span class="font-headline-sm text-headline-sm font-black text-on-surface">Vertex</span>
+<div class="flex items-center gap-sm bg-surface-container-low px-sm py-1 rounded border border-outline-variant w-64">
+<span class="material-symbols-outlined text-on-surface-variant scale-75">search</span>
+<input class="bg-transparent border-none focus:ring-0 text-label-xs font-label-xs w-full placeholder:text-on-surface-variant/50" placeholder="Search requests..." type="text"/>
+</div>
+</div>
+<nav class="flex items-center gap-lg h-full">
+<a class="text-on-surface border-b-2 border-primary pb-1 font-label-xs text-label-xs h-full flex items-center mt-1" href="#">Requests</a>
+<a class="text-on-surface-variant hover:text-on-surface font-label-xs text-label-xs transition-all duration-150" href="#">Collections</a>
+<a class="text-on-surface-variant hover:text-on-surface font-label-xs text-label-xs transition-all duration-150" href="#">Environments</a>
+<a class="text-on-surface-variant hover:text-on-surface font-label-xs text-label-xs transition-all duration-150" href="#">Real-time</a>
+</nav>
+<div class="flex items-center gap-md">
+<div class="flex items-center gap-xs">
+<button class="px-md py-1 bg-primary text-on-primary rounded font-label-xs text-label-xs font-bold hover:brightness-110 active:opacity-80 transition-all">Send</button>
+<button class="px-md py-1 border border-outline text-on-surface rounded font-label-xs text-label-xs hover:bg-surface-container-high transition-all">Save</button>
+</div>
+<div class="flex items-center gap-xs border-l border-outline-variant pl-md">
+<span class="material-symbols-outlined cursor-pointer hover:text-primary transition-colors">share</span>
+<span class="material-symbols-outlined cursor-pointer hover:text-primary transition-colors">more_vert</span>
+<img alt="User Profile" class="w-6 h-6 rounded-full bg-surface-container-highest border border-outline-variant" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCl_uzczva1TnKhkvYH93c77usAiR4lO7fIvtj6JHBRJxQtlNN48n3cOrGEPCM8zS9E__-Qn4P31hSuk7YTQoF1o045vbTPAlfKxNKg74gkY5iQD3aFhtJON4mnOgs1gORuQ6fv_Q1w5xEbuOeQ2k_OJrdGcvDTaTZPmuLWuW4OBGRvby_Ki4hoo6MBr_CGf88DhlgAFRzj2mg7RxFtYfs0IxIfiJQB_deaTPiES4QslgLwQz7AStTOsg3UKHqXDf-mGGBeI_-QmMyP"/>
+</div>
+</div>
+</header>
+<!-- Main Workspace -->
+<main class="flex flex-1 overflow-hidden">
+<!-- SideNavBar (Left Sidebar - Shared Component) -->
+<aside class="flex flex-col h-full w-[240px] bg-surface-container-low border-r border-outline-variant shrink-0">
+<div class="p-md space-y-md overflow-y-auto flex-1">
+<div class="flex items-center justify-between text-on-surface-variant mb-xs">
+<span class="font-label-xs text-label-xs uppercase tracking-widest opacity-60">Collections</span>
+<span class="material-symbols-outlined scale-75 cursor-pointer hover:text-on-surface">add</span>
+</div>
+<!-- Collections Tree -->
+<div class="space-y-xs">
+<!-- Collection: Auth -->
+<div class="group">
+<div class="flex items-center gap-xs px-xs py-1 cursor-pointer hover:bg-surface-container-high rounded transition-colors text-on-surface-variant hover:text-on-surface">
+<span class="material-symbols-outlined text-[16px]">expand_more</span>
+<span class="material-symbols-outlined text-[16px] text-primary">folder_open</span>
+<span class="text-body-sm font-body-sm">Auth</span>
+</div>
+<div class="ml-xl space-y-xs mt-xs">
+<div class="flex items-center gap-sm px-xs py-1 cursor-pointer hover:bg-surface-container-high rounded transition-colors text-on-surface-variant hover:text-on-surface">
+<span class="text-[10px] font-bold text-green-400 w-6">POST</span>
+<span class="text-body-sm font-body-sm">Login User</span>
+</div>
+<div class="flex items-center gap-sm px-xs py-1 cursor-pointer hover:bg-surface-container-high rounded transition-colors text-on-surface-variant hover:text-on-surface">
+<span class="text-[10px] font-bold text-green-400 w-6">POST</span>
+<span class="text-body-sm font-body-sm">Register User</span>
+</div>
+</div>
+</div>
+<!-- Collection: Users -->
+<div class="group">
+<div class="flex items-center gap-xs px-xs py-1 cursor-pointer hover:bg-surface-container-high rounded transition-colors text-on-surface-variant hover:text-on-surface">
+<span class="material-symbols-outlined text-[16px]">expand_more</span>
+<span class="material-symbols-outlined text-[16px] text-primary">folder_open</span>
+<span class="text-body-sm font-body-sm">Users</span>
+</div>
+<div class="ml-xl space-y-xs mt-xs">
+<div class="flex items-center gap-sm px-xs py-1 cursor-pointer bg-secondary-container/30 border-l-2 border-primary rounded-r transition-colors text-primary">
+<span class="text-[10px] font-bold text-primary w-6">GET</span>
+<span class="text-body-sm font-body-sm">Get Profile</span>
+</div>
+<div class="flex items-center gap-sm px-xs py-1 cursor-pointer hover:bg-surface-container-high rounded transition-colors text-on-surface-variant hover:text-on-surface">
+<span class="text-[10px] font-bold text-tertiary w-6">PUT</span>
+<span class="text-body-sm font-body-sm">Update Avatar</span>
+</div>
+</div>
+</div>
+<!-- Collection: Payments -->
+<div class="group">
+<div class="flex items-center gap-xs px-xs py-1 cursor-pointer hover:bg-surface-container-high rounded transition-colors text-on-surface-variant hover:text-on-surface">
+<span class="material-symbols-outlined text-[16px]">chevron_right</span>
+<span class="material-symbols-outlined text-[16px] text-primary">folder</span>
+<span class="text-body-sm font-body-sm">Payments</span>
+</div>
+</div>
+</div>
+</div>
+<!-- Sidebar Footer Tabs -->
+<div class="border-t border-outline-variant p-xs space-y-xs">
+<div class="flex items-center gap-md px-md py-2 cursor-pointer hover:bg-surface-container-high rounded text-on-surface-variant hover:text-on-surface transition-colors">
+<span class="material-symbols-outlined">settings</span>
+<span class="text-body-md font-body-md">Settings</span>
+</div>
+<div class="flex items-center gap-md px-md py-2 cursor-pointer hover:bg-surface-container-high rounded text-on-surface-variant hover:text-on-surface transition-colors">
+<span class="material-symbols-outlined">help</span>
+<span class="text-body-md font-body-md">Help</span>
+</div>
+</div>
+</aside>
+<!-- Center Panel: Editor & Response -->
+<section class="flex flex-col flex-1 editor-bg relative">
+<!-- Request Builder (Top half) -->
+<div class="flex flex-col h-1/2 border-b border-outline-variant min-h-[300px]">
+<!-- URL Bar -->
+<div class="p-md flex items-center gap-sm bg-surface-container/30">
+<div class="flex items-center bg-surface-container-highest rounded border border-outline-variant overflow-hidden flex-1 group focus-within:border-primary transition-colors">
+<select class="bg-surface-container-low text-primary font-bold text-label-xs px-md h-9 border-r border-outline-variant focus:ring-0 focus:outline-none appearance-none cursor-pointer">
+<option>GET</option>
+<option>POST</option>
+<option>PUT</option>
+<option>DELETE</option>
+</select>
+<input class="flex-1 bg-transparent border-none focus:ring-0 text-body-md font-code-md text-on-surface px-md h-9" type="text" value="https://api.vertex-client.com/v1/users/profile"/>
+</div>
+<button class="bg-primary text-on-primary px-xl h-9 rounded font-bold shadow-lg shadow-primary/10 hover:brightness-110 active:scale-95 transition-all">Send</button>
+</div>
+<!-- Request Tabs -->
+<div class="flex-1 flex flex-col">
+<div class="flex border-b border-outline-variant px-md gap-lg">
+<button class="text-on-surface border-b-2 border-primary py-2 text-label-xs font-label-xs">Params</button>
+<button class="text-on-surface-variant hover:text-on-surface py-2 text-label-xs font-label-xs transition-colors">Authorization</button>
+<button class="text-on-surface-variant hover:text-on-surface py-2 text-label-xs font-label-xs transition-colors">Headers <span class="bg-surface-container-highest px-1 rounded text-[9px]">4</span></button>
+<button class="text-on-surface-variant hover:text-on-surface py-2 text-label-xs font-label-xs transition-colors">Body</button>
+</div>
+<div class="flex-1 p-md overflow-y-auto">
+<table class="w-full text-left font-code-sm text-code-sm border-collapse">
+<thead class="text-on-surface-variant border-b border-outline-variant/30">
+<tr>
+<th class="pb-2 font-normal w-1/3">Key</th>
+<th class="pb-2 font-normal w-1/3">Value</th>
+<th class="pb-2 font-normal">Description</th>
+</tr>
+</thead>
+<tbody>
+<tr class="border-b border-outline-variant/10">
+<td class="py-2"><input class="bg-transparent border-none focus:ring-0 w-full p-0 text-on-surface" type="text" value="include_meta"/></td>
+<td class="py-2"><input class="bg-transparent border-none focus:ring-0 w-full p-0 text-primary" type="text" value="true"/></td>
+<td class="py-2"><input class="bg-transparent border-none focus:ring-0 w-full p-0 text-on-surface-variant opacity-40" placeholder="Add description..." type="text"/></td>
+</tr>
+<tr class="border-b border-outline-variant/10">
+<td class="py-2"><input class="bg-transparent border-none focus:ring-0 w-full p-0 text-on-surface" type="text" value="fields"/></td>
+<td class="py-2"><input class="bg-transparent border-none focus:ring-0 w-full p-0 text-primary" type="text" value="id,email,avatar,role"/></td>
+<td class="py-2"><input class="bg-transparent border-none focus:ring-0 w-full p-0 text-on-surface-variant opacity-40" placeholder="Add description..." type="text"/></td>
+</tr>
+<tr>
+<td class="py-2"><input class="bg-transparent border-none focus:ring-0 w-full p-0 text-on-surface-variant/40" placeholder="New Key" type="text"/></td>
+<td class="py-2"><input class="bg-transparent border-none focus:ring-0 w-full p-0 text-on-surface-variant/40" placeholder="New Value" type="text"/></td>
+<td class="py-2"></td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+</div>
+<!-- Response Viewer (Bottom half) -->
+<div class="flex flex-col h-1/2">
+<!-- Response Header -->
+<div class="flex items-center justify-between px-md py-sm bg-surface-container/50 border-b border-outline-variant">
+<div class="flex items-center gap-lg">
+<div class="flex items-center gap-sm">
+<span class="bg-green-500/20 text-green-400 text-[10px] font-bold px-2 py-0.5 rounded border border-green-500/30">200 OK</span>
+<span class="text-label-xs font-label-xs text-on-surface-variant">124ms</span>
+<span class="text-label-xs font-label-xs text-on-surface-variant">1.2KB</span>
+</div>
+</div>
+<div class="flex items-center gap-md">
+<button class="flex items-center gap-xs text-label-xs font-label-xs text-on-surface-variant hover:text-on-surface transition-colors">
+<span class="material-symbols-outlined scale-75">content_copy</span> Copy
+                            </button>
+<button class="flex items-center gap-xs text-label-xs font-label-xs text-on-surface-variant hover:text-on-surface transition-colors">
+<span class="material-symbols-outlined scale-75">download</span> JSON
+                            </button>
+</div>
+</div>
+<!-- JSON Body -->
+<div class="flex-1 p-md font-code-md text-code-md overflow-y-auto bg-surface-container-lowest">
+<pre class="text-on-surface"><span class="text-outline">{</span>
+  <span class="text-primary">"status"</span>: <span class="text-tertiary">"success"</span>,
+  <span class="text-primary">"data"</span>: <span class="text-outline">{</span>
+    <span class="text-primary">"user"</span>: <span class="text-outline">{</span>
+      <span class="text-primary">"id"</span>: <span class="text-tertiary">"usr_9x823b1"</span>,
+      <span class="text-primary">"email"</span>: <span class="text-tertiary">"alex.dev@vertex.io"</span>,
+      <span class="text-primary">"avatar"</span>: <span class="text-tertiary">"https://avatars.vertex.io/alex.png"</span>,
+      <span class="text-primary">"role"</span>: <span class="text-tertiary">"senior_engineer"</span>,
+      <span class="text-primary">"last_login"</span>: <span class="text-tertiary">"2023-10-24T14:22:01Z"</span>,
+      <span class="text-primary">"settings"</span>: <span class="text-outline">{</span>
+        <span class="text-primary">"theme"</span>: <span class="text-tertiary">"graphite"</span>,
+        <span class="text-primary">"notifications"</span>: <span class="text-tertiary">true</span>
+      <span class="text-outline">}</span>
+    <span class="text-outline">}</span>
+  <span class="text-outline">}</span>,
+  <span class="text-primary">"meta"</span>: <span class="text-outline">{</span>
+    <span class="text-primary">"api_version"</span>: <span class="text-tertiary">"v1.4.2"</span>,
+    <span class="text-primary">"request_id"</span>: <span class="text-tertiary">"req_ff82-291"</span>
+  <span class="text-outline">}</span>
+<span class="text-outline">}</span></pre>
+</div>
+</div>
+<!-- Floating FAB for New Request (Contextual) -->
+<button class="absolute bottom-6 right-6 w-12 h-12 bg-primary-container text-on-primary-container rounded-full flex items-center justify-center shadow-xl shadow-primary-container/20 hover:scale-105 active:scale-95 transition-all z-10">
+<span class="material-symbols-outlined">add</span>
+</button>
+</section>
+<!-- AI Assistant Sidebar (Right Sidebar) -->
+<aside class="flex flex-col h-full w-[280px] bg-surface-container-low border-l border-outline-variant transition-all duration-300" id="ai-sidebar">
+<div class="flex items-center justify-between p-md border-b border-outline-variant">
+<div class="flex items-center gap-sm text-primary">
+<span class="material-symbols-outlined">smart_toy</span>
+<span class="font-headline-sm text-headline-sm">AI Assistant</span>
+</div>
+<span class="material-symbols-outlined cursor-pointer text-on-surface-variant hover:text-on-surface" onclick="document.getElementById('ai-sidebar').classList.toggle('w-0'); document.getElementById('ai-sidebar').classList.toggle('overflow-hidden')">dock_to_right</span>
+</div>
+<!-- AI Chat Area -->
+<div class="flex-1 p-md overflow-y-auto space-y-lg">
+<!-- AI Bubble -->
+<div class="space-y-sm">
+<div class="flex items-center gap-xs text-[10px] uppercase font-bold text-on-surface-variant opacity-60">Vertex AI</div>
+<div class="bg-surface-container-high p-md rounded-lg border border-outline-variant/30 text-body-sm font-body-sm">
+                            Response received successfully. I see you're looking at user profile data. Would you like me to generate a TypeScript interface or a Jest test suite for this schema?
+                        </div>
+</div>
+<!-- Suggestions -->
+<div class="space-y-xs">
+<button class="w-full text-left px-md py-2 bg-surface-container text-label-xs font-label-xs rounded border border-outline-variant hover:bg-surface-container-highest transition-colors">
+                            Explain this response
+                        </button>
+<button class="w-full text-left px-md py-2 bg-surface-container text-label-xs font-label-xs rounded border border-outline-variant hover:bg-surface-container-highest transition-colors">
+                            Generate Jest test
+                        </button>
+<button class="w-full text-left px-md py-2 bg-surface-container text-label-xs font-label-xs rounded border border-outline-variant hover:bg-surface-container-highest transition-colors">
+                            Create TS Interface
+                        </button>
+</div>
+</div>
+<!-- Prompt Input -->
+<div class="p-md border-t border-outline-variant">
+<div class="relative">
+<textarea class="w-full bg-surface-container-lowest border border-outline-variant focus:border-primary focus:ring-0 rounded-lg p-md text-body-sm font-body-sm min-h-[80px] resize-none pr-xl" placeholder="Ask Vertex AI..."></textarea>
+<button class="absolute bottom-3 right-3 text-primary hover:scale-110 active:opacity-50 transition-all">
+<span class="material-symbols-outlined">send</span>
+</button>
+</div>
+<p class="text-[10px] text-on-surface-variant mt-xs text-center opacity-50">AI may produce inaccurate data.</p>
+</div>
+</aside>
+</main>
+<!-- Footer (Shared Component) -->
+<footer class="flex justify-between items-center px-xl w-full bg-surface-container-lowest h-8 border-t border-outline-variant shrink-0 z-50">
+<div class="flex items-center gap-xl h-full">
+<span class="font-code-sm text-code-sm text-secondary">Vertex API Client v1.0.4</span>
+<div class="flex items-center gap-md text-on-surface-variant">
+<span class="flex items-center gap-xs font-code-sm text-code-sm"><span class="w-2 h-2 rounded-full bg-green-500"></span> Online</span>
+<span class="font-code-sm text-code-sm border-l border-outline-variant pl-md">No Environment</span>
+</div>
+</div>
+<div class="flex items-center gap-lg">
+<a class="font-code-sm text-code-sm text-on-surface-variant hover:text-primary transition-colors" href="#">Docs</a>
+<a class="font-code-sm text-code-sm text-on-surface-variant hover:text-primary transition-colors" href="#">Support</a>
+<a class="font-code-sm text-code-sm text-on-surface-variant hover:text-primary transition-colors" href="#">Privacy</a>
+<span class="material-symbols-outlined text-[14px] text-on-surface-variant hover:text-primary cursor-pointer ml-md">notifications</span>
+</div>
+</footer>
+</div>
+<!-- Micro-interaction Scripts -->
+<script>
+        // Simulate a "Send" request ripple effect
+        document.querySelectorAll('button').forEach(btn => {
+            btn.addEventListener('click', function(e) {
+                if (this.innerText === 'Send') {
+                    this.innerHTML = '<span class="material-symbols-outlined animate-spin scale-75">refresh</span>';
+                    setTimeout(() => {
+                        this.innerHTML = 'Send';
+                    }, 1000);
+                }
+            });
+        });
+
+        // Simple folder toggle visualization logic
+        document.querySelectorAll('.group > div').forEach(header => {
+            header.addEventListener('click', function() {
+                const icon = this.querySelector('.material-symbols-outlined:first-child');
+                if (icon && (icon.innerText === 'expand_more' || icon.innerText === 'chevron_right')) {
+                    icon.innerText = icon.innerText === 'expand_more' ? 'chevron_right' : 'expand_more';
+                    const next = this.nextElementSibling;
+                    if (next) next.classList.toggle('hidden');
+                }
+            });
+        });
+    </script>
+</body></html>
