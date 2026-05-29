@@ -89,6 +89,8 @@ pub struct ApiRequest {
     pub body: RequestBody,
     #[serde(default)]
     pub auth: Auth,
+    #[serde(default)]
+    pub scripts: RequestScripts,
     #[serde(default = "default_timeout_ms")]
     pub timeout_ms: u64,
     #[serde(default)]
@@ -107,10 +109,19 @@ impl Default for ApiRequest {
             headers: Vec::new(),
             body: RequestBody::None,
             auth: Auth::None,
+            scripts: RequestScripts::default(),
             timeout_ms: default_timeout_ms(),
             metadata: Metadata::new(),
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct RequestScripts {
+    #[serde(default)]
+    pub pre_request: String,
+    #[serde(default)]
+    pub post_request: String,
 }
 
 impl ApiRequest {

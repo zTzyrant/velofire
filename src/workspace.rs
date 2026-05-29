@@ -1,6 +1,6 @@
 use crate::http_engine::mask_sensitive_headers;
 use crate::models::{
-    ApiRequest, ApiResponse, Collection, Environment, EnvironmentVariable, FormField, Header,
+    ApiRequest, ApiResponse, Auth, Collection, Environment, EnvironmentVariable, FormField, Header,
     RequestBody, RequestHistoryEntry, SavedRequest, Workspace,
 };
 use std::collections::BTreeMap;
@@ -57,12 +57,13 @@ impl FileWorkspaceStore {
         let requests_dir = collection_dir.join("requests");
         fs::create_dir_all(&requests_dir)?;
 
-        let mut manifest = collection.clone();
+        let sanitized = sanitize_collection_secrets(collection);
+        let mut manifest = sanitized.clone();
         manifest.requests.clear();
         let manifest_path = collection_dir.join("collection.yaml");
         self.write_yaml_at(&manifest_path, &manifest)?;
 
-        for saved in &collection.requests {
+        for saved in &sanitized.requests {
             let request_path = request_file_path(&requests_dir, saved);
             if let Some(parent) = request_path.parent() {
                 fs::create_dir_all(parent)?;
@@ -104,7 +105,7 @@ impl FileWorkspaceStore {
         fs::create_dir_all(self.environments_dir())?;
         let filename = format!("{}.yaml", slug(&environment.name));
         let path = self.environments_dir().join(filename);
-        self.write_yaml_at(&path, environment)?;
+        self.write_yaml_at(&path, &sanitize_environment_secrets(environment))?;
         Ok(path)
     }
 
@@ -154,6 +155,16 @@ impl FileWorkspaceStore {
         Ok(entry)
     }
 
+    pub fn export_collection_json(&self, collection: &Collection) -> WorkspaceResult<String> {
+        serde_json::to_string_pretty(&sanitize_collection_secrets(collection))
+            .map_err(|error| WorkspaceError::Serialization(error.to_string()))
+    }
+
+    pub fn export_collection_yaml(&self, collection: &Collection) -> WorkspaceResult<String> {
+        serde_yaml::to_string(&sanitize_collection_secrets(collection))
+            .map_err(|error| WorkspaceError::Serialization(error.to_string()))
+    }
+
     fn collections_dir(&self) -> PathBuf {
         self.root.join(".collections")
     }
@@ -186,6 +197,51 @@ impl FileWorkspaceStore {
         serde_yaml::from_str(&content)
             .map_err(|error| WorkspaceError::Serialization(error.to_string()))
     }
+}
+
+pub fn sanitize_collection_secrets(collection: &Collection) -> Collection {
+    let mut collection = collection.clone();
+    for saved in &mut collection.requests {
+        saved.request.headers = crate::http_engine::mask_sensitive_headers(&saved.request.headers);
+        saved.request.auth = sanitize_auth(&saved.request.auth);
+    }
+    collection
+}
+
+pub fn sanitize_environment_secrets(environment: &Environment) -> Environment {
+    let mut environment = environment.clone();
+    for variable in &mut environment.variables {
+        if variable.is_secret || is_sensitive_name(&variable.key) {
+            variable.is_secret = true;
+            variable.value = "********".to_string();
+        }
+    }
+    environment
+}
+
+fn sanitize_auth(auth: &Auth) -> Auth {
+    match auth {
+        Auth::None => Auth::None,
+        Auth::Bearer { .. } => Auth::Bearer {
+            token: "********".to_string(),
+        },
+        Auth::Basic { username, .. } => Auth::Basic {
+            username: username.clone(),
+            password: "********".to_string(),
+        },
+        Auth::ApiKey { key, location, .. } => Auth::ApiKey {
+            key: key.clone(),
+            value: "********".to_string(),
+            location: location.clone(),
+        },
+    }
+}
+
+fn is_sensitive_name(name: &str) -> bool {
+    let name = name.to_ascii_lowercase();
+    ["token", "secret", "password", "key", "credential"]
+        .iter()
+        .any(|part| name.contains(part))
 }
 
 pub fn resolve_request_environment(

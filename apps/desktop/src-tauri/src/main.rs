@@ -3,11 +3,19 @@ use std::path::PathBuf;
 use velofire::http_engine;
 use velofire::importers;
 use velofire::models::{ApiRequest, ApiResponse, Collection};
+use velofire::request_service::{self, ExecuteRequestInput, ExecuteRequestOutput};
 use velofire::workspace::FileWorkspaceStore;
 
 #[tauri::command]
 async fn send_request(request: ApiRequest) -> Result<ApiResponse, String> {
     http_engine::send_request(request)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn execute_request(input: ExecuteRequestInput) -> Result<ExecuteRequestOutput, String> {
+    request_service::execute_request(input)
         .await
         .map_err(|error| error.to_string())
 }
@@ -53,16 +61,33 @@ fn save_collection(root_path: String, collection: Collection) -> Result<String, 
         .map_err(|error| error.to_string())
 }
 
+#[tauri::command]
+fn export_collection_json(collection: Collection) -> Result<String, String> {
+    FileWorkspaceStore::new(PathBuf::new())
+        .export_collection_json(&collection)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn export_collection_yaml(collection: Collection) -> Result<String, String> {
+    FileWorkspaceStore::new(PathBuf::new())
+        .export_collection_yaml(&collection)
+        .map_err(|error| error.to_string())
+}
+
 fn main() {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
             send_request,
+            execute_request,
             import_curl,
             import_postman_collection,
             import_openapi,
             init_workspace,
             load_collections,
-            save_collection
+            save_collection,
+            export_collection_json,
+            export_collection_yaml
         ])
         .run(tauri::generate_context!())
         .expect("failed to run Velofire desktop app");

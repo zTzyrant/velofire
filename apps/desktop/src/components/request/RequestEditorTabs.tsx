@@ -1,7 +1,7 @@
 import { createMemo, createSignal, For, Show } from "solid-js";
-import type { ApiRequest, Auth, Header, RequestBody } from "../../types";
+import type { ApiRequest, Auth, FormField, Header, RequestBody } from "../../types";
 
-const tabs = ["Params", "Headers", "Auth", "Body"] as const;
+const tabs = ["Params", "Headers", "Auth", "Body", "Scripts"] as const;
 type EditorTab = (typeof tabs)[number];
 
 interface RequestEditorTabsProps {
@@ -17,6 +17,25 @@ function bodyText(body: RequestBody): string {
   return "";
 }
 
+function bodyForType(type: RequestBody["type"], current: RequestBody): RequestBody {
+  if (type === "none") return { type: "none" };
+  if (type === "form_data" || type === "url_encoded") {
+    return current.type === "form_data" || current.type === "url_encoded"
+      ? { type, fields: current.fields }
+      : { type, fields: [{ key: "", value: "", enabled: true }] };
+  }
+  const value = bodyText(current);
+  if (type === "json") {
+    try {
+      return { type: "json", value: JSON.parse(value || "{}") };
+    } catch {
+      return { type: "json", value };
+    }
+  }
+  if (type === "xml") return { type: "xml", value };
+  return { type: "raw_text", value };
+}
+
 function applyBodyText(type: RequestBody["type"], value: string): RequestBody {
   if (type === "none") return { type: "none" };
   if (type === "json") {
@@ -27,7 +46,8 @@ function applyBodyText(type: RequestBody["type"], value: string): RequestBody {
     }
   }
   if (type === "xml") return { type: "xml", value };
-  return { type: "raw_text", value };
+  if (type === "raw_text") return { type: "raw_text", value };
+  return { type, fields: [] };
 }
 
 function authLabel(auth: Auth): string {
@@ -131,6 +151,14 @@ export function RequestEditorTabs(props: RequestEditorTabsProps) {
             onChange={(body) => props.updateRequest((request) => ({ ...request, body }))}
           />
         </Show>
+
+        <Show when={activeTab() === "Scripts"}>
+          <ScriptEditor
+            preRequest={props.request.scripts?.pre_request ?? ""}
+            postRequest={props.request.scripts?.post_request ?? ""}
+            onChange={(scripts) => props.updateRequest((request) => ({ ...request, scripts }))}
+          />
+        </Show>
       </div>
 
       <aside class="panel inspector">
@@ -139,6 +167,7 @@ export function RequestEditorTabs(props: RequestEditorTabsProps) {
           <div><dt>Name</dt><dd>{props.request.name}</dd></div>
           <div><dt>Auth</dt><dd>{authLabel(props.request.auth)}</dd></div>
           <div><dt>Body</dt><dd>{props.request.body.type}</dd></div>
+          <div><dt>Scripts</dt><dd>{props.request.scripts?.pre_request || props.request.scripts?.post_request ? "Configured" : "None"}</dd></div>
           <div><dt>Timeout</dt><dd>{props.request.timeout_ms / 1000}s</dd></div>
           <div><dt>Runtime</dt><dd>{props.runtime}</dd></div>
         </dl>
@@ -294,21 +323,59 @@ function AuthEditor(props: { auth: Auth; onChange: (auth: Auth) => void }) {
 
 function BodyEditor(props: { body: RequestBody; onChange: (body: RequestBody) => void }) {
   const value = createMemo(() => bodyText(props.body));
+
+  function updateField(index: number, patch: Partial<FormField>) {
+    if (props.body.type !== "form_data" && props.body.type !== "url_encoded") {
+      return;
+    }
+    props.onChange({
+      ...props.body,
+      fields: props.body.fields.map((field, rowIndex) => (rowIndex === index ? { ...field, ...patch } : field)),
+    });
+  }
+
+  function addField() {
+    if (props.body.type !== "form_data" && props.body.type !== "url_encoded") {
+      return;
+    }
+    props.onChange({ ...props.body, fields: [...props.body.fields, { key: "", value: "", enabled: true }] });
+  }
+
+  function removeField(index: number) {
+    if (props.body.type !== "form_data" && props.body.type !== "url_encoded") {
+      return;
+    }
+    props.onChange({ ...props.body, fields: props.body.fields.filter((_, rowIndex) => rowIndex !== index) });
+  }
+
   return (
     <div class="body-editor">
       <label class="field-stack compact">
         <span>Type</span>
         <select
           value={props.body.type}
-          onInput={(event) => props.onChange(applyBodyText(event.currentTarget.value as RequestBody["type"], value()))}
+          onInput={(event) => props.onChange(bodyForType(event.currentTarget.value as RequestBody["type"], props.body))}
         >
           <option value="none">None</option>
           <option value="json">JSON</option>
+          <option value="form_data">Form data</option>
+          <option value="url_encoded">URL encoded</option>
           <option value="raw_text">Raw</option>
           <option value="xml">XML</option>
         </select>
       </label>
-      <Show when={props.body.type !== "none"}>
+
+      <Show when={props.body.type === "form_data" || props.body.type === "url_encoded"}>
+        <KeyValueTable
+          rows={(props.body.type === "form_data" || props.body.type === "url_encoded") ? props.body.fields : []}
+          label="Body field"
+          onUpdate={updateField}
+          onAdd={addField}
+          onRemove={removeField}
+        />
+      </Show>
+
+      <Show when={props.body.type !== "none" && props.body.type !== "form_data" && props.body.type !== "url_encoded"}>
         <textarea
           class="body-textarea"
           value={value()}
@@ -317,6 +384,35 @@ function BodyEditor(props: { body: RequestBody; onChange: (body: RequestBody) =>
           onInput={(event) => props.onChange(applyBodyText(props.body.type, event.currentTarget.value))}
         />
       </Show>
+    </div>
+  );
+}
+
+function ScriptEditor(props: {
+  preRequest: string;
+  postRequest: string;
+  onChange: (scripts: { pre_request: string; post_request: string }) => void;
+}) {
+  return (
+    <div class="script-editor">
+      <label class="field-stack">
+        <span>Pre-request</span>
+        <textarea
+          class="body-textarea"
+          spellcheck={false}
+          value={props.preRequest}
+          onInput={(event) => props.onChange({ pre_request: event.currentTarget.value, post_request: props.postRequest })}
+        />
+      </label>
+      <label class="field-stack">
+        <span>Post-request</span>
+        <textarea
+          class="body-textarea"
+          spellcheck={false}
+          value={props.postRequest}
+          onInput={(event) => props.onChange({ pre_request: props.preRequest, post_request: event.currentTarget.value })}
+        />
+      </label>
     </div>
   );
 }

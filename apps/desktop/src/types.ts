@@ -22,6 +22,11 @@ export type RequestBody =
   | { type: "raw_text"; value: string }
   | { type: "xml"; value: string };
 
+export interface RequestScripts {
+  pre_request: string;
+  post_request: string;
+}
+
 export type ApiKeyLocation = "header" | "query";
 
 export type Auth =
@@ -42,6 +47,7 @@ export interface ApiRequest {
   auth: Auth;
   timeout_ms: number;
   metadata: Record<string, string>;
+  scripts?: RequestScripts;
 }
 
 export interface ApiResponse {
@@ -89,6 +95,35 @@ export interface EnvironmentVariable {
   value: string;
   is_secret: boolean;
   enabled: boolean;
+}
+
+export interface Environment {
+  id: string;
+  workspace_id?: string;
+  name: string;
+  variables: EnvironmentVariable[];
+}
+
+export interface RequestHistoryEntry {
+  id: string;
+  workspace_id?: string;
+  request_snapshot: ApiRequest;
+  response_snapshot?: ApiResponse;
+  created_at: string;
+}
+
+export interface ExecuteRequestInput {
+  request: ApiRequest;
+  environment?: Environment;
+  root_path?: string;
+  save_history?: boolean;
+}
+
+export interface ExecuteRequestOutput {
+  request: ApiRequest;
+  response: ApiResponse;
+  history?: RequestHistoryEntry;
+  script_log: string[];
 }
 
 export interface RequestHistoryItem {

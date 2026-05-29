@@ -332,6 +332,7 @@ mod tests {
             headers: Vec::new(),
             body: RequestBody::None,
             auth,
+            scripts: Default::default(),
             metadata: Default::default(),
             timeout_ms: 30_000,
             query_params: Vec::new(),

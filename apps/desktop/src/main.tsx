@@ -1,31 +1,31 @@
 import { createMemo, createSignal, For, Show } from "solid-js";
 import { render } from "solid-js/web";
 import {
+  executeRequest,
+  exportCollectionJson,
+  exportCollectionYaml,
   importCurl,
   importOpenApi,
   importPostmanCollection,
   loadCollections,
   saveCollection,
-  sendRequest,
 } from "./services/commands";
 import type {
   ApiRequest,
   ApiResponse,
   Collection,
   CollectionFolder,
+  Environment,
   EnvironmentVariable,
-  Auth,
-  Header,
   HttpMethod,
-  RequestBody,
   RequestHistoryItem,
   SavedRequest,
 } from "./types";
+import { RequestEditorTabs } from "./components/request/RequestEditorTabs";
+import { ResponseViewer } from "./components/response/ResponseViewer";
 import "./styles.css";
 
 const methods: HttpMethod[] = ["Get", "Post", "Put", "Patch", "Delete"];
-const tabs = ["Params", "Headers", "Auth", "Body"] as const;
-type EditorTab = (typeof tabs)[number];
 type SideView = "Collections" | "History" | "Environments" | "Imports";
 
 function id(prefix: string): string {
@@ -45,6 +45,7 @@ function defaultRequest(name = "New Request"): ApiRequest {
     auth: { type: "none" },
     timeout_ms: 30000,
     metadata: {},
+    scripts: { pre_request: "", post_request: "" },
   };
 }
 
@@ -77,35 +78,8 @@ function methodClass(method: HttpMethod): string {
   return method === "Delete" ? "del" : method.toLowerCase();
 }
 
-function bodyText(body: RequestBody): string {
-  if (body.type === "json") return JSON.stringify(body.value, null, 2);
-  if (body.type === "raw_text" || body.type === "xml") return body.value;
-  return "";
-}
-
-function applyBodyText(type: RequestBody["type"], value: string): RequestBody {
-  if (type === "none") return { type: "none" };
-  if (type === "json") {
-    try {
-      return { type: "json", value: JSON.parse(value || "{}") };
-    } catch {
-      return { type: "raw_text", value };
-    }
-  }
-  if (type === "xml") return { type: "xml", value };
-  return { type: "raw_text", value };
-}
-
-function resolveEnvironment(value: string, variables: EnvironmentVariable[]): string {
-  return value.replace(/\{\{\s*([a-zA-Z0-9_.-]+)\s*\}\}/g, (_, key: string) => {
-    const variable = variables.find((item) => item.enabled && item.key === key);
-    return variable?.value ?? `{{${key}}}`;
-  });
-}
-
 function App() {
   const [sideView, setSideView] = createSignal<SideView>("Collections");
-  const [activeTab, setActiveTab] = createSignal<EditorTab>("Params");
   const [workspacePath, setWorkspacePath] = createSignal(localStorage.getItem("velofire:workspace") ?? ".");
   const [collections, setCollections] = createSignal<Collection[]>([defaultCollection()]);
   const [activeRequestId, setActiveRequestId] = createSignal(collections()[0].requests[0].id);
@@ -139,31 +113,6 @@ function App() {
         }),
       })),
     );
-  }
-
-  function updateRow(kind: "query_params" | "headers", index: number, patch: Partial<Header>) {
-    updateRequest((request) => ({
-      ...request,
-      [kind]: request[kind].map((row, rowIndex) => (rowIndex === index ? { ...row, ...patch } : row)),
-    }));
-  }
-
-  function addRow(kind: "query_params" | "headers") {
-    updateRequest((request) => ({
-      ...request,
-      [kind]: [...request[kind], { key: "", value: "", enabled: true }],
-    }));
-  }
-
-  function removeRow(kind: "query_params" | "headers", index: number) {
-    updateRequest((request) => ({
-      ...request,
-      [kind]: request[kind].filter((_, rowIndex) => rowIndex !== index),
-    }));
-  }
-
-  function updateAuth(auth: Auth) {
-    updateRequest((request) => ({ ...request, auth }));
   }
 
   function newCollection() {
@@ -207,24 +156,29 @@ function App() {
     setMessage(null);
     try {
       const request = currentRequest();
-      const resolved: ApiRequest = {
-        ...request,
-        url: resolveEnvironment(request.url, environment()),
-        headers: request.headers.map((header) => ({
-          ...header,
-          value: resolveEnvironment(header.value, environment()),
-        })),
+      const activeEnvironment: Environment = {
+        id: "local",
+        name: "Local",
+        variables: environment(),
       };
-      const result = await sendRequest(resolved);
-      setResponse(result);
+      const result = await executeRequest({
+        request,
+        environment: activeEnvironment,
+        root_path: workspacePath(),
+        save_history: true,
+      });
+      setResponse(result.response);
+      if (result.script_log.length > 0) {
+        setMessage(result.script_log.join("\n"));
+      }
       setHistory((items) => [
         {
-          id: id("history"),
+          id: result.history?.id ?? id("history"),
           name: request.name ?? request.url,
-          request,
-          status: result.status,
-          duration_ms: result.duration_ms,
-          created_at: new Date().toLocaleTimeString(),
+          request: result.request,
+          status: result.response.status,
+          duration_ms: result.response.duration_ms,
+          created_at: result.history?.created_at ?? new Date().toLocaleTimeString(),
         },
         ...items.slice(0, 49),
       ]);
@@ -255,6 +209,33 @@ function App() {
     localStorage.setItem("velofire:workspace", workspacePath());
     const path = await saveCollection(workspacePath(), collection);
     setMessage(`Saved ${collection.name} to ${path}.`);
+  }
+
+  function activeCollection(): Collection | undefined {
+    return collections().find((item) =>
+      item.requests.some((request) => request.id === activeRequestId()),
+    );
+  }
+
+  function downloadText(filename: string, text: string) {
+    const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = filename;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  }
+
+  async function onExport(format: "json" | "yaml") {
+    const collection = activeCollection();
+    if (!collection) return;
+    const content =
+      format === "json"
+        ? await exportCollectionJson(collection)
+        : await exportCollectionYaml(collection);
+    downloadText(`${collection.name}.${format === "json" ? "json" : "yaml"}`, content);
+    setMessage(`Exported ${collection.name} as ${format.toUpperCase()}.`);
   }
 
   async function onImportCurl() {
@@ -313,6 +294,8 @@ function App() {
           </label>
           <button class="ghost-button" type="button" onClick={onLoadCollections}>Load</button>
           <button class="ghost-button" type="button" onClick={onSaveActiveCollection}>Save</button>
+          <button class="ghost-button" type="button" onClick={() => onExport("json")}>JSON</button>
+          <button class="ghost-button" type="button" onClick={() => onExport("yaml")}>YAML</button>
           <button class="primary-button" type="button" onClick={onSend} disabled={loading()}>
             {loading() ? "Sending" : "Send"}
           </button>
@@ -488,231 +471,17 @@ function App() {
               </button>
             </div>
 
-            <div class="editor-grid">
-              <div class="panel request-config">
-                <div class="panel-tabs" role="tablist" aria-label="Request configuration">
-                  <For each={tabs}>
-                    {(tab) => (
-                      <button
-                        class={`panel-tab ${activeTab() === tab ? "active" : ""}`}
-                        type="button"
-                        onClick={() => setActiveTab(tab)}
-                      >
-                        {tab}
-                        <Show when={tab === "Headers"}>
-                          <span class="count">{currentRequest().headers.length}</span>
-                        </Show>
-                      </button>
-                    )}
-                  </For>
-                </div>
-
-                <Show when={activeTab() === "Params"}>
-                  <KeyValueTable
-                    rows={currentRequest().query_params}
-                    onUpdate={(index, patch) => updateRow("query_params", index, patch)}
-                    onAdd={() => addRow("query_params")}
-                    onRemove={(index) => removeRow("query_params", index)}
-                  />
-                </Show>
-
-                <Show when={activeTab() === "Headers"}>
-                  <KeyValueTable
-                    rows={currentRequest().headers}
-                    onUpdate={(index, patch) => updateRow("headers", index, patch)}
-                    onAdd={() => addRow("headers")}
-                    onRemove={(index) => removeRow("headers", index)}
-                  />
-                </Show>
-
-                <Show when={activeTab() === "Auth"}>
-                  <AuthEditor auth={currentRequest().auth} onChange={updateAuth} />
-                </Show>
-
-                <Show when={activeTab() === "Body"}>
-                  <BodyEditor
-                    body={currentRequest().body}
-                    onChange={(body) => updateRequest((request) => ({ ...request, body }))}
-                  />
-                </Show>
-              </div>
-              <aside class="panel inspector">
-                <div class="panel-title">Request</div>
-                <dl class="meta-list">
-                  <div><dt>Name</dt><dd>{currentRequest().name}</dd></div>
-                  <div><dt>Auth</dt><dd>{currentRequest().auth.type}</dd></div>
-                  <div><dt>Timeout</dt><dd>{currentRequest().timeout_ms / 1000}s</dd></div>
-                  <div><dt>Runtime</dt><dd>{("__TAURI_INTERNALS__" in window) ? "Tauri" : "Browser"}</dd></div>
-                </dl>
-                <Show when={message()}>
-                  <p class="panel-message">{message()}</p>
-                </Show>
-              </aside>
-            </div>
+            <RequestEditorTabs
+              request={currentRequest()}
+              message={message()}
+              runtime={("__TAURI_INTERNALS__" in window) ? "Tauri" : "Browser"}
+              updateRequest={updateRequest}
+            />
           </section>
 
-          <section class="response-viewer">
-            <div class="response-header">
-              <div class="response-meta">
-                <Show when={response()} fallback={<span class="status-chip idle">Idle</span>}>
-                  {(res) => (
-                    <>
-                      <span class="status-chip">{res().status} {res().status_text}</span>
-                      <span>{res().duration_ms} ms</span>
-                      <span>{res().body_bytes_len} B</span>
-                    </>
-                  )}
-                </Show>
-              </div>
-              <div class="response-actions">
-                <button
-                  class="ghost-button"
-                  type="button"
-                  onClick={() => navigator.clipboard?.writeText(response()?.body_text ?? "")}
-                >
-                  Copy
-                </button>
-              </div>
-            </div>
-            <div class="response-tabs" role="tablist" aria-label="Response views">
-              <button class="panel-tab active" type="button">Body</button>
-              <button class="panel-tab" type="button">Headers</button>
-              <button class="panel-tab" type="button">Timeline</button>
-            </div>
-            <pre class="code-view" aria-label="Response body"><code>{message() ?? response()?.body_text ?? "{\n  \"status\": \"ready\"\n}"}</code></pre>
-          </section>
+          <ResponseViewer response={response()} message={message()} />
         </section>
       </main>
-    </div>
-  );
-}
-
-function KeyValueTable(props: {
-  rows: Header[];
-  onUpdate: (index: number, patch: Partial<Header>) => void;
-  onAdd: () => void;
-  onRemove: (index: number) => void;
-}) {
-  return (
-    <div class="key-value-table" aria-label="Key value editor">
-      <div class="table-head">
-        <span>Key</span>
-        <span>Value</span>
-        <span>On</span>
-      </div>
-      <For each={props.rows}>
-        {(row, index) => (
-          <label class="table-row">
-            <input value={row.key} onInput={(event) => props.onUpdate(index(), { key: event.currentTarget.value })} />
-            <input value={row.value} onInput={(event) => props.onUpdate(index(), { value: event.currentTarget.value })} />
-            <span class="row-actions">
-              <input
-                type="checkbox"
-                checked={row.enabled}
-                onInput={(event) => props.onUpdate(index(), { enabled: event.currentTarget.checked })}
-              />
-              <button type="button" class="mini-button" onClick={() => props.onRemove(index())}>Remove</button>
-            </span>
-          </label>
-        )}
-      </For>
-      <button class="table-add" type="button" onClick={props.onAdd}>Add row</button>
-    </div>
-  );
-}
-
-function AuthEditor(props: { auth: Auth; onChange: (auth: Auth) => void }) {
-  return (
-    <div class="form-panel">
-      <select
-        value={props.auth.type}
-        onInput={(event) => {
-          const type = event.currentTarget.value as Auth["type"];
-          if (type === "none") props.onChange({ type: "none" });
-          if (type === "bearer") props.onChange({ type: "bearer", token: "" });
-          if (type === "basic") props.onChange({ type: "basic", username: "", password: "" });
-          if (type === "api_key") props.onChange({ type: "api_key", key: "x-api-key", value: "", location: "header" });
-        }}
-      >
-        <option value="none">None</option>
-        <option value="bearer">Bearer Token</option>
-        <option value="basic">Basic Auth</option>
-        <option value="api_key">API Key</option>
-      </select>
-      <Show when={props.auth.type === "bearer" && props.auth}>
-        {(auth) => (
-          <input
-            type="password"
-            placeholder="Token"
-            value={(auth() as Extract<Auth, { type: "bearer" }>).token}
-            onInput={(event) => props.onChange({ type: "bearer", token: event.currentTarget.value })}
-          />
-        )}
-      </Show>
-      <Show when={props.auth.type === "basic" && props.auth}>
-        {(auth) => {
-          const basic = () => auth() as Extract<Auth, { type: "basic" }>;
-          return (
-            <>
-              <input
-                placeholder="Username"
-                value={basic().username}
-                onInput={(event) => props.onChange({ ...basic(), username: event.currentTarget.value })}
-              />
-              <input
-                type="password"
-                placeholder="Password"
-                value={basic().password}
-                onInput={(event) => props.onChange({ ...basic(), password: event.currentTarget.value })}
-              />
-            </>
-          );
-        }}
-      </Show>
-      <Show when={props.auth.type === "api_key" && props.auth}>
-        {(auth) => {
-          const apiKey = () => auth() as Extract<Auth, { type: "api_key" }>;
-          return (
-            <>
-              <input value={apiKey().key} onInput={(event) => props.onChange({ ...apiKey(), key: event.currentTarget.value })} />
-              <input
-                type="password"
-                value={apiKey().value}
-                onInput={(event) => props.onChange({ ...apiKey(), value: event.currentTarget.value })}
-              />
-              <select
-                value={apiKey().location}
-                onInput={(event) => props.onChange({ ...apiKey(), location: event.currentTarget.value as "header" | "query" })}
-              >
-                <option value="header">Header</option>
-                <option value="query">Query</option>
-              </select>
-            </>
-          );
-        }}
-      </Show>
-    </div>
-  );
-}
-
-function BodyEditor(props: { body: RequestBody; onChange: (body: RequestBody) => void }) {
-  const value = createMemo(() => bodyText(props.body));
-  return (
-    <div class="body-editor">
-      <select
-        value={props.body.type}
-        onInput={(event) => props.onChange(applyBodyText(event.currentTarget.value as RequestBody["type"], value()))}
-      >
-        <option value="none">None</option>
-        <option value="json">JSON</option>
-        <option value="raw_text">Raw Text</option>
-        <option value="xml">XML</option>
-      </select>
-      <textarea
-        value={value()}
-        disabled={props.body.type === "none"}
-        onInput={(event) => props.onChange(applyBodyText(props.body.type, event.currentTarget.value))}
-      />
     </div>
   );
 }

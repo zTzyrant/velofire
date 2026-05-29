@@ -525,11 +525,13 @@ button:focus-visible {
 }
 
 .body-editor {
-  grid-template-rows: 30px 1fr;
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
 }
 
 .body-editor textarea,
-.side-textarea {
+.side-textarea,
+.script-editor textarea {
   min-height: 0;
   resize: none;
   border: 1px solid var(--outline-soft);
@@ -541,6 +543,50 @@ button:focus-visible {
   line-height: 18px;
   outline: none;
   padding: 8px;
+}
+
+.body-editor .key-value-table {
+  min-height: 0;
+  padding: 0;
+}
+
+.field-stack {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.field-stack span {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.field-stack.compact {
+  max-width: 220px;
+}
+
+.two-column-fields,
+.api-key-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.api-key-fields {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 140px;
+}
+
+.script-editor {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  min-height: 0;
+  padding: 10px;
+}
+
+.script-editor .field-stack {
+  min-height: 0;
 }
 
 .side-textarea {
@@ -677,6 +723,63 @@ button:focus-visible {
   tab-size: 2;
 }
 
+.segmented-control {
+  display: inline-flex;
+  height: 28px;
+  overflow: hidden;
+  border: 1px solid var(--outline-soft);
+  border-radius: 6px;
+}
+
+.segmented-control button {
+  min-width: 58px;
+  border: 0;
+  border-right: 1px solid var(--outline-soft);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.segmented-control button:last-child {
+  border-right: 0;
+}
+
+.segmented-control button.active {
+  background: var(--surface-high);
+  color: var(--text);
+}
+
+.response-detail-table,
+.response-facts {
+  min-height: 0;
+  margin: 0;
+  overflow: auto;
+  padding: 10px;
+}
+
+.detail-row,
+.response-facts div {
+  display: grid;
+  grid-template-columns: minmax(140px, 0.45fr) minmax(0, 1fr);
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--outline-soft) 45%, transparent);
+}
+
+.detail-row span,
+.response-facts dt {
+  color: var(--text-muted);
+}
+
+.detail-row code,
+.response-facts dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 12px;
+}
+
 .json-key {
   color: var(--primary);
 }
@@ -704,5 +807,11 @@ button:focus-visible {
 
   .inspector {
     display: none;
+  }
+
+  .script-editor,
+  .two-column-fields,
+  .api-key-fields {
+    grid-template-columns: 1fr;
   }
 }
