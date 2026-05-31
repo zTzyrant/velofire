@@ -290,6 +290,8 @@ pub struct ApiResponse {
     pub body_text: String,
     pub body_bytes_len: usize,
     #[serde(default)]
+    pub body_truncated: bool,
+    #[serde(default)]
     pub content_type: Option<String>,
     pub duration_ms: u128,
     pub started_at_ms: u128,

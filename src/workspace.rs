@@ -8,6 +8,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 
+const MAX_HISTORY_RESPONSE_BODY_BYTES: usize = 256 * 1024;
+
 #[derive(Debug, Error)]
 pub enum WorkspaceError {
     #[error("storage error: {0}")]
@@ -137,11 +139,12 @@ impl FileWorkspaceStore {
         let now = timestamp();
         let mut request_snapshot = request.clone();
         request_snapshot.headers = mask_sensitive_headers(&request_snapshot.headers);
+        request_snapshot.auth = sanitize_auth(&request_snapshot.auth);
         let entry = RequestHistoryEntry {
             id: stable_id("history", &format!("{now}:{}", request.url)),
             workspace_id,
             request_snapshot,
-            response_snapshot: response.cloned(),
+            response_snapshot: response.map(sanitize_history_response),
             created_at: now,
         };
         let line = serde_json::to_string(&entry)
@@ -153,6 +156,31 @@ impl FileWorkspaceStore {
             .open(path)?
             .write_all_with_newline(&line)?;
         Ok(entry)
+    }
+
+    pub fn load_history(&self) -> WorkspaceResult<Vec<RequestHistoryEntry>> {
+        let path = self.history_path();
+        if !path.exists() {
+            return Ok(Vec::new());
+        }
+
+        let content = fs::read_to_string(path)?;
+        let mut entries = Vec::new();
+        for line in content.lines().filter(|line| !line.trim().is_empty()) {
+            let entry = serde_json::from_str(line)
+                .map_err(|error| WorkspaceError::Serialization(error.to_string()))?;
+            entries.push(entry);
+        }
+        entries.reverse();
+        Ok(entries)
+    }
+
+    pub fn clear_history(&self) -> WorkspaceResult<()> {
+        let path = self.history_path();
+        if path.exists() {
+            fs::write(path, "")?;
+        }
+        Ok(())
     }
 
     pub fn export_collection_json(&self, collection: &Collection) -> WorkspaceResult<String> {
@@ -177,6 +205,10 @@ impl FileWorkspaceStore {
         self.collections_dir()
     }
 
+    fn history_path(&self) -> PathBuf {
+        self.history_dir().join("history.jsonl")
+    }
+
     fn write_yaml<T: serde::Serialize>(&self, name: &str, value: &T) -> WorkspaceResult<()> {
         self.write_yaml_at(&self.root.join(name), value)
     }
@@ -197,6 +229,17 @@ impl FileWorkspaceStore {
         serde_yaml::from_str(&content)
             .map_err(|error| WorkspaceError::Serialization(error.to_string()))
     }
+}
+
+fn sanitize_history_response(response: &ApiResponse) -> ApiResponse {
+    let mut snapshot = response.clone();
+    snapshot.headers = mask_sensitive_headers(&snapshot.headers);
+    if snapshot.body.len() > MAX_HISTORY_RESPONSE_BODY_BYTES {
+        snapshot.body.truncate(MAX_HISTORY_RESPONSE_BODY_BYTES);
+        snapshot.body_text = String::from_utf8_lossy(&snapshot.body).into_owned();
+        snapshot.body_truncated = true;
+    }
+    snapshot
 }
 
 pub fn sanitize_collection_secrets(collection: &Collection) -> Collection {
@@ -463,6 +506,12 @@ mod tests {
     use super::*;
     use crate::models::{EnvironmentVariable, HttpMethod};
 
+    fn test_workspace(name: &str) -> PathBuf {
+        let root = std::env::temp_dir().join(format!("velofire-{name}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        root
+    }
+
     #[test]
     fn resolves_template_variables() {
         let mut vars = BTreeMap::new();
@@ -520,5 +569,62 @@ mod tests {
 
         assert_eq!(resolved.url, "https://api.test/users");
         assert_eq!(resolved.headers[0].value, "Bearer abc");
+    }
+
+    #[test]
+    fn loads_history_newest_first_with_masked_request_snapshot() {
+        let root = test_workspace("load-history");
+        let store = FileWorkspaceStore::new(&root);
+        let request = ApiRequest {
+            method: HttpMethod::Get,
+            url: "https://api.test/users".to_string(),
+            headers: vec![Header {
+                key: "Authorization".to_string(),
+                value: "Bearer secret-token".to_string(),
+                enabled: true,
+            }],
+            auth: Auth::Bearer {
+                token: "secret-token".to_string(),
+            },
+            ..ApiRequest::default()
+        };
+
+        let first = store.append_history(None, &request, None).unwrap();
+        let mut second_request = request.clone();
+        second_request.url = "https://api.test/projects".to_string();
+        let second = store.append_history(None, &second_request, None).unwrap();
+
+        let loaded = store.load_history().unwrap();
+
+        assert_eq!(
+            loaded.iter().map(|entry| &entry.id).collect::<Vec<_>>(),
+            vec![&second.id, &first.id]
+        );
+        assert_eq!(loaded[0].request_snapshot.headers[0].value, "********");
+        assert_eq!(
+            loaded[0].request_snapshot.auth,
+            Auth::Bearer {
+                token: "********".to_string()
+            }
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn clear_history_leaves_empty_history_file() {
+        let root = test_workspace("clear-history");
+        let store = FileWorkspaceStore::new(&root);
+        let request = ApiRequest {
+            method: HttpMethod::Get,
+            url: "https://api.test/users".to_string(),
+            ..ApiRequest::default()
+        };
+        store.append_history(None, &request, None).unwrap();
+
+        store.clear_history().unwrap();
+
+        assert!(store.load_history().unwrap().is_empty());
+        assert!(root.join(".collections").join("history.jsonl").exists());
+        let _ = fs::remove_dir_all(root);
     }
 }

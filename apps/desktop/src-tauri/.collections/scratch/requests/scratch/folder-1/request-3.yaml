@@ -1,0 +1,28 @@
+id: request-mpucqi43-dj0x2
+collection_id: collection-mpucq06r-odld8
+folder_id: folder-mpucqgft-hryh5
+name: Request 3
+request:
+  id: request-mpucqi43-dj0x2
+  name: Request 3
+  path:
+  - Scratch
+  - Folder 1
+  method: Get
+  url: https://httpbin.org/get
+  query_params: []
+  headers:
+  - key: Accept
+    value: application/json
+    enabled: true
+  body:
+    type: none
+  auth:
+    type: none
+  scripts:
+    pre_request: ''
+    post_request: ''
+  timeout_ms: 30000
+  metadata: {}
+created_at: null
+updated_at: null

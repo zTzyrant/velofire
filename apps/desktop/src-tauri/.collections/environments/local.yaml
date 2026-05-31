@@ -1,0 +1,12 @@
+id: environment-local
+workspace_id: null
+name: Local
+variables:
+- key: base_url
+  value: https://httpbin.org
+  is_secret: false
+  enabled: true
+- key: token
+  value: '********'
+  is_secret: true
+  enabled: true

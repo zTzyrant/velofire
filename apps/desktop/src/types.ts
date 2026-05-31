@@ -56,6 +56,7 @@ export interface ApiResponse {
   headers: Header[];
   body_text: string;
   body_bytes_len: number;
+  body_truncated?: boolean;
   content_type?: string;
   duration_ms: number;
   started_at_ms: number;
@@ -104,6 +105,24 @@ export interface Environment {
   variables: EnvironmentVariable[];
 }
 
+export interface Workspace {
+  id: string;
+  name: string;
+  root_path: string;
+  active_environment_id?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ImportReport {
+  collection: Collection;
+  warnings: string[];
+  unsupported: string[];
+  source_format: string;
+  source_version?: string;
+  imported_request_count: number;
+}
+
 export interface RequestHistoryEntry {
   id: string;
   workspace_id?: string;
@@ -130,6 +149,7 @@ export interface RequestHistoryItem {
   id: string;
   name: string;
   request: ApiRequest;
+  response?: ApiResponse;
   status?: number;
   duration_ms?: number;
   created_at: string;

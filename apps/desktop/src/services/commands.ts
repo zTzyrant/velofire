@@ -1,4 +1,14 @@
-import type { ApiRequest, ApiResponse, Collection, ExecuteRequestInput, ExecuteRequestOutput } from "../types";
+import type {
+  ApiRequest,
+  ApiResponse,
+  Collection,
+  Environment,
+  ExecuteRequestInput,
+  ExecuteRequestOutput,
+  ImportReport,
+  RequestHistoryEntry,
+  Workspace,
+} from "../types";
 
 type Invoke = <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>;
 
@@ -69,6 +79,64 @@ export async function saveCollection(rootPath: string, collection: Collection): 
   return invoke<string>("save_collection", { rootPath, collection });
 }
 
+export async function initWorkspace(rootPath: string, name: string): Promise<Workspace> {
+  const invoke = await getInvoke();
+  if (!invoke) {
+    const workspace: Workspace = {
+      id: `workspace-${rootPath}`,
+      name,
+      root_path: rootPath,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    localStorage.setItem("velofire:workspace-metadata", JSON.stringify(workspace));
+    return workspace;
+  }
+  return invoke<Workspace>("init_workspace", { rootPath, name });
+}
+
+export async function loadEnvironments(rootPath: string): Promise<Environment[]> {
+  const invoke = await getInvoke();
+  if (!invoke) {
+    const prefix = "velofire:environment:";
+    return Object.entries(localStorage)
+      .filter(([key]) => key.startsWith(prefix))
+      .map(([, value]) => JSON.parse(value) as Environment)
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }
+  return invoke<Environment[]>("load_environments", { rootPath });
+}
+
+export async function saveEnvironment(rootPath: string, environment: Environment): Promise<string> {
+  const invoke = await getInvoke();
+  if (!invoke) {
+    localStorage.setItem(
+      `velofire:environment:${environment.id}`,
+      JSON.stringify(sanitizeEnvironment(environment)),
+    );
+    return "browser-local-storage";
+  }
+  return invoke<string>("save_environment", { rootPath, environment });
+}
+
+export async function loadHistory(rootPath: string): Promise<RequestHistoryEntry[]> {
+  const invoke = await getInvoke();
+  if (!invoke) {
+    const value = localStorage.getItem("velofire:history");
+    return value ? JSON.parse(value) as RequestHistoryEntry[] : [];
+  }
+  return invoke<RequestHistoryEntry[]>("load_history", { rootPath });
+}
+
+export async function clearHistory(rootPath: string): Promise<void> {
+  const invoke = await getInvoke();
+  if (!invoke) {
+    localStorage.removeItem("velofire:history");
+    return;
+  }
+  await invoke<void>("clear_history", { rootPath });
+}
+
 export async function exportCollectionJson(collection: Collection): Promise<string> {
   const invoke = await getInvoke();
   if (!invoke) {
@@ -107,20 +175,20 @@ export async function importCurl(command: string): Promise<ApiRequest> {
   return invoke<ApiRequest>("import_curl", { command });
 }
 
-export async function importPostmanCollection(content: string): Promise<Collection> {
+export async function importPostmanCollection(content: string): Promise<ImportReport> {
   const invoke = await getInvoke();
   if (!invoke) {
     throw new Error("Postman import requires the Tauri desktop runtime.");
   }
-  return invoke<Collection>("import_postman_collection", { content });
+  return invoke<ImportReport>("import_postman_collection", { content });
 }
 
-export async function importOpenApi(content: string): Promise<Collection> {
+export async function importOpenApi(content: string): Promise<ImportReport> {
   const invoke = await getInvoke();
   if (!invoke) {
     throw new Error("OpenAPI import requires the Tauri desktop runtime.");
   }
-  return invoke<Collection>("import_openapi", { content });
+  return invoke<ImportReport>("import_openapi", { content });
 }
 
 function collectionToYaml(value: unknown, indent = 0): string {
@@ -173,6 +241,17 @@ function sanitizeCollection(collection: Collection): Collection {
   };
 }
 
+function sanitizeEnvironment(environment: Environment): Environment {
+  return {
+    ...environment,
+    variables: environment.variables.map((variable) =>
+      variable.is_secret || isSensitiveVariableName(variable.key)
+        ? { ...variable, is_secret: true, value: "********" }
+        : variable,
+    ),
+  };
+}
+
 function sanitizeAuth(auth: ApiRequest["auth"]): ApiRequest["auth"] {
   if (auth.type === "bearer") return { ...auth, token: "********" };
   if (auth.type === "basic") return { ...auth, password: "********" };
@@ -182,4 +261,9 @@ function sanitizeAuth(auth: ApiRequest["auth"]): ApiRequest["auth"] {
 
 function isSensitiveName(name: string): boolean {
   return ["authorization", "cookie", "x-api-key", "x-auth-token"].includes(name.toLowerCase());
+}
+
+function isSensitiveVariableName(name: string): boolean {
+  const lower = name.toLowerCase();
+  return ["token", "secret", "password", "key", "credential"].some((part) => lower.includes(part));
 }

@@ -1,0 +1,26 @@
+id: request-mpucq06r-hrt75
+collection_id: collection-mpucq06r-odld8
+folder_id: null
+name: Get httpbin
+request:
+  id: request-mpucq06r-hrt75
+  name: Get httpbin
+  path: []
+  method: Get
+  url: https://httpbin.org/get
+  query_params: []
+  headers:
+  - key: Accept
+    value: application/json
+    enabled: true
+  body:
+    type: none
+  auth:
+    type: none
+  scripts:
+    pre_request: ''
+    post_request: ''
+  timeout_ms: 30000
+  metadata: {}
+created_at: null
+updated_at: null

@@ -9,6 +9,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use thiserror::Error;
 use url::Url;
 
+const MAX_RESPONSE_BODY_BYTES: usize = 2 * 1024 * 1024;
+
 #[derive(Debug, Error, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type", content = "message", rename_all = "snake_case")]
 pub enum RestError {
@@ -85,7 +87,7 @@ impl RestClient {
             }
         };
 
-        let response = builder.send().await.map_err(map_reqwest_error)?;
+        let mut response = builder.send().await.map_err(map_reqwest_error)?;
         let status = response.status();
         let status_text = status.canonical_reason().unwrap_or("").to_string();
         let final_url = response.url().to_string();
@@ -95,12 +97,8 @@ impl RestClient {
             .get(CONTENT_TYPE)
             .and_then(|value| value.to_str().ok())
             .map(ToOwned::to_owned);
-        let body_bytes = response
-            .bytes()
-            .await
-            .map_err(|error| RestError::Body(error.to_string()))?;
-        let body_bytes_len = body_bytes.len();
-        let body = body_bytes.to_vec();
+        let (body, body_bytes_len, body_truncated) =
+            read_limited_body(&mut response, MAX_RESPONSE_BODY_BYTES).await?;
         let body_text = String::from_utf8_lossy(&body).into_owned();
         let finished_at_ms = now_ms();
 
@@ -111,6 +109,7 @@ impl RestClient {
             body,
             body_text,
             body_bytes_len,
+            body_truncated,
             content_type,
             duration_ms: timer.elapsed().as_millis(),
             started_at_ms,
@@ -118,6 +117,32 @@ impl RestClient {
             final_url,
         })
     }
+}
+
+async fn read_limited_body(
+    response: &mut reqwest::Response,
+    max_bytes: usize,
+) -> RestResult<(Vec<u8>, usize, bool)> {
+    let mut body = Vec::new();
+    let mut total_len = 0usize;
+    let mut truncated = false;
+
+    while let Some(chunk) = response
+        .chunk()
+        .await
+        .map_err(|error| RestError::Body(error.to_string()))?
+    {
+        total_len += chunk.len();
+        if body.len() < max_bytes {
+            let remaining = max_bytes - body.len();
+            body.extend_from_slice(&chunk[..chunk.len().min(remaining)]);
+        }
+        if total_len > max_bytes {
+            truncated = true;
+        }
+    }
+
+    Ok((body, total_len, truncated))
 }
 
 pub async fn send_request(request: ApiRequest) -> RestResult<ApiResponse> {

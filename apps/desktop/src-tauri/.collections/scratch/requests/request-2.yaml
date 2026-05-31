@@ -1,0 +1,26 @@
+id: request-mpucq5kp-bj3kn
+collection_id: collection-mpucq06r-odld8
+folder_id: null
+name: Request 2
+request:
+  id: request-mpucq5kp-bj3kn
+  name: Request 2
+  path: []
+  method: Get
+  url: https://httpbin.org/get
+  query_params: []
+  headers:
+  - key: Accept
+    value: application/json
+    enabled: true
+  body:
+    type: none
+  auth:
+    type: none
+  scripts:
+    pre_request: ''
+    post_request: ''
+  timeout_ms: 30000
+  metadata: {}
+created_at: null
+updated_at: null

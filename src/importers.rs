@@ -2,7 +2,7 @@ use crate::models::{
     ApiKeyLocation, ApiRequest, Auth, Collection, CollectionFolder, FormField, Header, HttpMethod,
     RequestBody, SavedRequest,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
 
@@ -16,7 +16,7 @@ pub enum ImportError {
 
 pub type ImportResult<T> = Result<T, ImportError>;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ImportReport {
     pub collection: Collection,
     pub warnings: Vec<String>,
