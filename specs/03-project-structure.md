@@ -49,25 +49,28 @@ project-root/
 ## Struktur Frontend Target
 
 ```txt
-src/
+apps/desktop/src/
 ├── components/
 │   ├── common/
+│   ├── layout/
 │   ├── request/
 │   ├── response/
 │   ├── sidebar/
+│   ├── ui/
 │   └── editor/
-├── routes/
 ├── stores/
 ├── services/
 ├── hooks/
-├── layouts/
-├── styles/
+├── lib/
+├── styles.css
 └── utils/
 ```
 
 Panduan:
 
 - `components/common`: button, input, tabs, splitter, modal, menu, command palette primitives.
+- `components/ui`: shadcn-style local primitives berbasis SolidJS dan Tailwind CSS. Jangan import shadcn React.
+- `components/layout`: topbar, shell, split pane, dan layout aplikasi desktop.
 - `components/request`: method selector, URL bar, headers table, body editor, auth editor.
 - `components/response`: response tabs, JSON viewer, raw viewer, header viewer, timing/status display.
 - `components/sidebar`: collections, history, environments.
@@ -75,9 +78,17 @@ Panduan:
 - `stores`: state UI lokal, selected request, environment aktif, request tabs.
 - `services`: wrapper Tauri commands dan API frontend-to-backend.
 - `hooks`: reusable behavior seperti resize pane, keyboard shortcut, debounced input.
-- `layouts`: application shell, split panes, topbar.
-- `styles`: design tokens, global CSS, theme.
+- `styles.css`: Tailwind v4 import, design tokens, global CSS, app-level layout, dan CSS khusus Tauri.
+- `lib`: helper frontend seperti `cn`.
 - `utils`: pure frontend helpers.
+
+## Frontend Tooling Saat Ini
+
+- Framework: SolidJS + Vite.
+- Styling: Tailwind CSS v4 via `@tailwindcss/vite`.
+- UI primitive: shadcn-style local components di `apps/desktop/src/components/ui`.
+- Icons: `lucide-solid` bila tersedia.
+- Notifications: `solid-sonner`.
 
 ## Struktur Rust/Tauri Target
 

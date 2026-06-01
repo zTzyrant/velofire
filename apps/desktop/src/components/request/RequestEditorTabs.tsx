@@ -1,10 +1,13 @@
 import { createEffect, createSignal, For, Show } from "solid-js";
 import type { ApiRequest, Auth, EnvironmentVariable, FormField, Header, RequestBody } from "../../types";
+import { pickFile } from "../../services/commands";
 
 const tabs = ["Params", "Headers", "Auth", "Body", "Scripts"] as const;
 type EditorTab = (typeof tabs)[number];
 type KeyValueRow = Pick<Header, "key" | "value" | "enabled">;
+type BodyFieldRow = FormField;
 type BodyType = RequestBody["type"];
+type TextEditable = HTMLInputElement | HTMLTextAreaElement;
 
 const bodyTypes: { value: BodyType; label: string }[] = [
   { value: "none", label: "None" },
@@ -14,6 +17,31 @@ const bodyTypes: { value: BodyType; label: string }[] = [
   { value: "form_data", label: "Form Data" },
   { value: "url_encoded", label: "URL Encoded" },
 ];
+
+const autoPairs: Record<string, string> = {
+  '"': '"',
+  "'": "'",
+  "`": "`",
+  "{": "}",
+  "[": "]",
+  "(": ")",
+};
+
+function autoClosePair(event: KeyboardEvent & { currentTarget: TextEditable }, apply: (value: string) => void) {
+  const close = autoPairs[event.key];
+  if (!close || event.ctrlKey || event.altKey || event.metaKey) return;
+  const target = event.currentTarget;
+  const start = target.selectionStart ?? target.value.length;
+  const end = target.selectionEnd ?? start;
+  const selected = target.value.slice(start, end);
+  event.preventDefault();
+  const next = `${target.value.slice(0, start)}${event.key}${selected}${close}${target.value.slice(end)}`;
+  apply(next);
+  queueMicrotask(() => {
+    const cursor = selected ? end + 2 : start + 1;
+    target.setSelectionRange(cursor, cursor + selected.length);
+  });
+}
 
 interface RequestEditorTabsProps {
   request: ApiRequest;
@@ -35,7 +63,7 @@ function bodyForType(type: BodyType, current: RequestBody): RequestBody {
   if (type === "form_data" || type === "url_encoded") {
     return current.type === "form_data" || current.type === "url_encoded"
       ? { type, fields: current.fields }
-      : { type, fields: [{ key: "", value: "", enabled: true }] };
+      : { type, fields: [{ key: "", field_type: "text", value: "", enabled: true }] };
   }
   const value = bodyText(current);
   if (type === "json") {
@@ -91,7 +119,7 @@ function bodyVariableSource(body: RequestBody): string {
   if (body.type === "json") return typeof body.value === "string" ? body.value : JSON.stringify(body.value);
   if (body.type === "raw_text" || body.type === "xml") return body.value;
   if (body.type === "form_data" || body.type === "url_encoded") {
-    return body.fields.map((field) => `${field.key} ${field.value}`).join("\n");
+    return body.fields.map((field) => `${field.key} ${field.value} ${field.file_path ?? ""} ${field.file_name ?? ""}`).join("\n");
   }
   return "";
 }
@@ -182,6 +210,7 @@ export function RequestEditorTabs(props: RequestEditorTabsProps) {
           ),
         };
       }
+      if (value === "multipart/form-data") return request;
       return {
         ...request,
         headers: [...request.headers, { key: "Content-Type", value, enabled: true }],
@@ -259,9 +288,16 @@ export function RequestEditorTabs(props: RequestEditorTabsProps) {
 
         <Show when={activeTab() === "Scripts"}>
           <ScriptEditor
+            runtime={props.request.metadata?.script_runtime === "node" ? "node" : "dsl"}
             preRequest={props.request.scripts?.pre_request ?? ""}
             postRequest={props.request.scripts?.post_request ?? ""}
             onChange={(scripts) => props.updateRequest((request) => ({ ...request, scripts }))}
+            onRuntimeChange={(runtime) =>
+              props.updateRequest((request) => ({
+                ...request,
+                metadata: { ...request.metadata, script_runtime: runtime === "node" ? "node" : "dsl" },
+              }))
+            }
           />
         </Show>
       </div>
@@ -323,11 +359,13 @@ function KeyValueTable(props: {
                 <input
                   value={row.key}
                   aria-label={`${props.label} key`}
+                  onKeyDown={(event) => autoClosePair(event, (value) => props.onUpdate(index(), { key: value }))}
                   onInput={(event) => props.onUpdate(index(), { key: event.currentTarget.value })}
                 />
                 <input
                   value={row.value}
                   aria-label={`${props.label} value`}
+                  onKeyDown={(event) => autoClosePair(event, (value) => props.onUpdate(index(), { value }))}
                   onInput={(event) => props.onUpdate(index(), { value: event.currentTarget.value })}
                 />
                 <span class="row-actions">
@@ -343,6 +381,148 @@ function KeyValueTable(props: {
                     class="mini-button icon-mini-button row-remove"
                     title={`Remove ${props.label.toLowerCase()}`}
                     aria-label={`Remove ${props.label.toLowerCase()}`}
+                    onClick={() => props.onRemove(index())}
+                  >
+                    x
+                  </button>
+                </span>
+              </div>
+            )}
+          </For>
+        </Show>
+      </div>
+      <button class="table-add" type="button" onClick={props.onAdd}>
+        Add row
+      </button>
+    </div>
+  );
+}
+
+function BodyFieldTable(props: {
+  rows: BodyFieldRow[];
+  allowFileFields: boolean;
+  onUpdate: (index: number, patch: Partial<BodyFieldRow>) => void;
+  onAdd: () => void;
+  onRemove: (index: number) => void;
+}) {
+  async function chooseFile(index: number) {
+    const path = await pickFile();
+    if (!path) return;
+    props.onUpdate(index, { file_path: path });
+  }
+
+  return (
+    <div class="key-value-table" aria-label="Body field editor">
+      <div class="table-head">
+        <span>Key</span>
+        <span>{props.allowFileFields ? "Type / Value" : "Value"}</span>
+        <span>On</span>
+      </div>
+      <div class="table-body">
+        <Show
+          when={props.rows.length > 0}
+          fallback={<div class="empty-state table-empty">No body field rows configured.</div>}
+        >
+          <For each={props.rows}>
+            {(row, index) => (
+              <div class="table-row">
+                <input
+                  value={row.key}
+                  aria-label="Body field key"
+                  onKeyDown={(event) => autoClosePair(event, (value) => props.onUpdate(index(), { key: value }))}
+                  onInput={(event) => props.onUpdate(index(), { key: event.currentTarget.value })}
+                />
+                <div class="grid min-w-0 grid-cols-[86px_minmax(0,1fr)] gap-1">
+                  <Show
+                    when={props.allowFileFields}
+                    fallback={
+                      <input
+                        value={row.value}
+                        aria-label="Body field value"
+                        onKeyDown={(event) => autoClosePair(event, (value) => props.onUpdate(index(), { value }))}
+                        onInput={(event) => props.onUpdate(index(), { value: event.currentTarget.value })}
+                      />
+                    }
+                  >
+                    <select
+                      class="h-[30px] rounded-none px-1.5 font-mono text-[11px]"
+                      value={row.field_type ?? "text"}
+                      aria-label="Body field type"
+                      onInput={(event) =>
+                        props.onUpdate(index(), {
+                          field_type: event.currentTarget.value as "text" | "file",
+                          value: event.currentTarget.value === "file" ? "" : row.value,
+                        })
+                      }
+                    >
+                      <option value="text">Text</option>
+                      <option value="file">File</option>
+                    </select>
+                    <Show
+                      when={(row.field_type ?? "text") === "file"}
+                      fallback={
+                        <input
+                          value={row.value}
+                          aria-label="Body field value"
+                          onKeyDown={(event) => autoClosePair(event, (value) => props.onUpdate(index(), { value }))}
+                          onInput={(event) => props.onUpdate(index(), { value: event.currentTarget.value })}
+                        />
+                      }
+                    >
+                      <div class="grid min-w-0 grid-cols-[minmax(0,1fr)_70px] gap-1">
+                        <input
+                          value={row.file_path ?? ""}
+                          aria-label="Body field file path"
+                          placeholder="Choose file"
+                          title={row.file_path ?? "Local file path"}
+                          onKeyDown={(event) => autoClosePair(event, (value) => props.onUpdate(index(), { file_path: value }))}
+                          onInput={(event) => props.onUpdate(index(), { file_path: event.currentTarget.value })}
+                        />
+                        <button
+                          class="mini-button h-[30px] rounded-none px-2"
+                          type="button"
+                          onClick={() => chooseFile(index())}
+                        >
+                          Browse
+                        </button>
+                        <input
+                          class="col-span-2"
+                          value={row.file_name ?? ""}
+                          aria-label="Body field file name override"
+                          placeholder="Optional file name override"
+                          onKeyDown={(event) => autoClosePair(event, (value) => props.onUpdate(index(), { file_name: value }))}
+                          onInput={(event) => props.onUpdate(index(), { file_name: event.currentTarget.value })}
+                        />
+                        <input
+                          class="col-span-2"
+                          value={row.content_type ?? ""}
+                          aria-label="Body field content type"
+                          placeholder="Optional content type, e.g. image/png"
+                          onKeyDown={(event) => autoClosePair(event, (value) => props.onUpdate(index(), { content_type: value }))}
+                          onInput={(event) => props.onUpdate(index(), { content_type: event.currentTarget.value })}
+                        />
+                        <Show when={!row.file_path?.trim()}>
+                          <span class="col-span-2 text-[10px] text-[var(--warning)]">
+                            Missing file path.
+                          </span>
+                        </Show>
+                      </div>
+                    </Show>
+                  </Show>
+                </div>
+                <span class="row-actions">
+                  <input
+                    type="checkbox"
+                    checked={row.enabled}
+                    aria-label="Body field enabled"
+                    title="Body field enabled"
+                    onInput={(event) => props.onUpdate(index(), { enabled: event.currentTarget.checked })}
+                  />
+                  <button
+                    type="button"
+                    class="mini-button icon-mini-button row-remove"
+                    title="Remove body field"
+                    aria-label="Remove body field"
                     onClick={() => props.onRemove(index())}
                   >
                     x
@@ -383,6 +563,7 @@ function AuthEditor(props: { auth: Auth; onChange: (auth: Auth) => void }) {
             <input
               type="password"
               value={(auth() as Extract<Auth, { type: "bearer" }>).token}
+              onKeyDown={(event) => autoClosePair(event, (value) => props.onChange({ type: "bearer", token: value }))}
               onInput={(event) => props.onChange({ type: "bearer", token: event.currentTarget.value })}
             />
           </label>
@@ -398,6 +579,7 @@ function AuthEditor(props: { auth: Auth; onChange: (auth: Auth) => void }) {
                 <span>Username</span>
                 <input
                   value={basic().username}
+                  onKeyDown={(event) => autoClosePair(event, (value) => props.onChange({ ...basic(), username: value }))}
                   onInput={(event) => props.onChange({ ...basic(), username: event.currentTarget.value })}
                 />
               </label>
@@ -406,6 +588,7 @@ function AuthEditor(props: { auth: Auth; onChange: (auth: Auth) => void }) {
                 <input
                   type="password"
                   value={basic().password}
+                  onKeyDown={(event) => autoClosePair(event, (value) => props.onChange({ ...basic(), password: value }))}
                   onInput={(event) => props.onChange({ ...basic(), password: event.currentTarget.value })}
                 />
               </label>
@@ -423,6 +606,7 @@ function AuthEditor(props: { auth: Auth; onChange: (auth: Auth) => void }) {
                 <span>Key</span>
                 <input
                   value={apiKey().key}
+                  onKeyDown={(event) => autoClosePair(event, (value) => props.onChange({ ...apiKey(), key: value }))}
                   onInput={(event) => props.onChange({ ...apiKey(), key: event.currentTarget.value })}
                 />
               </label>
@@ -431,6 +615,7 @@ function AuthEditor(props: { auth: Auth; onChange: (auth: Auth) => void }) {
                 <input
                   type="password"
                   value={apiKey().value}
+                  onKeyDown={(event) => autoClosePair(event, (value) => props.onChange({ ...apiKey(), value }))}
                   onInput={(event) => props.onChange({ ...apiKey(), value: event.currentTarget.value })}
                 />
               </label>
@@ -503,7 +688,7 @@ function BodyEditor(props: {
     if (props.body.type !== "form_data" && props.body.type !== "url_encoded") {
       return;
     }
-    props.onChange({ ...props.body, fields: [...props.body.fields, { key: "", value: "", enabled: true }] });
+    props.onChange({ ...props.body, fields: [...props.body.fields, { key: "", field_type: "text", value: "", enabled: true }] });
   }
 
   function removeField(index: number) {
@@ -540,9 +725,9 @@ function BodyEditor(props: {
 
       <Show when={props.body.type === "form_data" || props.body.type === "url_encoded"}>
         <div class="show-wrap">
-          <KeyValueTable
+          <BodyFieldTable
             rows={(props.body.type === "form_data" || props.body.type === "url_encoded") ? props.body.fields : []}
-            label="Body field"
+            allowFileFields={props.body.type === "form_data"}
             onUpdate={updateField}
             onAdd={addField}
             onRemove={removeField}
@@ -563,6 +748,7 @@ function BodyEditor(props: {
             value={draft()}
             spellcheck={false}
             aria-label="Request body"
+            onKeyDown={(event) => autoClosePair(event, updateBodyText)}
             onInput={(event) => updateBodyText(event.currentTarget.value)}
           />
           <Show when={jsonError()}>
@@ -575,18 +761,40 @@ function BodyEditor(props: {
 }
 
 function ScriptEditor(props: {
+  runtime: "dsl" | "node";
   preRequest: string;
   postRequest: string;
   onChange: (scripts: { pre_request: string; post_request: string }) => void;
+  onRuntimeChange: (runtime: "dsl" | "node") => void;
 }) {
   return (
     <div class="script-editor">
+      <div class="script-toolbar">
+        <label class="field-stack compact">
+          <span>Runtime</span>
+          <select
+            value={props.runtime}
+            onInput={(event) => props.onRuntimeChange(event.currentTarget.value as "dsl" | "node")}
+          >
+            <option value="dsl">Velofire DSL</option>
+            <option value="node">Node.js sandbox</option>
+          </select>
+        </label>
+        <p class="field-hint">
+          {props.runtime === "node"
+            ? "Use vf.setEnv, vf.setHeader, vf.log, vf.crypto, request, and response."
+            : "Commands: set_header, set_env, log."}
+        </p>
+      </div>
       <label class="field-stack">
         <span>Pre-request</span>
         <textarea
           class="body-textarea"
           spellcheck={false}
           value={props.preRequest}
+          onKeyDown={(event) =>
+            autoClosePair(event, (value) => props.onChange({ pre_request: value, post_request: props.postRequest }))
+          }
           onInput={(event) => props.onChange({ pre_request: event.currentTarget.value, post_request: props.postRequest })}
         />
       </label>
@@ -596,6 +804,9 @@ function ScriptEditor(props: {
           class="body-textarea"
           spellcheck={false}
           value={props.postRequest}
+          onKeyDown={(event) =>
+            autoClosePair(event, (value) => props.onChange({ pre_request: props.preRequest, post_request: value }))
+          }
           onInput={(event) => props.onChange({ pre_request: props.preRequest, post_request: event.currentTarget.value })}
         />
       </label>

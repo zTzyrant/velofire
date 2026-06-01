@@ -48,7 +48,13 @@ interface SidebarProps {
   onSetImportText: (text: string) => void;
   onImportCurl: () => void;
   onImportCollection: (format: "postman" | "openapi") => void;
-  onMoveRequest: (requestId: string, folderId?: string) => void;
+  onMoveRequest: (
+    requestId: string,
+    targetCollectionId: string,
+    folderId?: string,
+    targetRequestId?: string,
+    position?: "before" | "after",
+  ) => void;
 }
 
 function methodLabel(method: HttpMethod): string {
@@ -95,18 +101,21 @@ const COLLECTION_FOLDER_ROW =
 const REQUEST_ROW =
   "grid grid-cols-[34px_minmax(0,1fr)] items-center w-full h-6 border-0 rounded bg-transparent text-[var(--text-muted)] text-left pl-5 hover:bg-[var(--surface-high)] hover:text-[var(--text)] cursor-grab active:cursor-grabbing select-none";
 
-let dndPayload: { requestId: string; folderId?: string } | null = null;
+let dndPayload: { requestId: string; collectionId: string; folderId?: string } | null = null;
 
 export function Sidebar(props: SidebarProps) {
   const [draggingId, setDraggingId] = createSignal<string | null>(null);
   const [dropTargetId, setDropTargetId] = createSignal<string | null>(null);
+  const [dropPosition, setDropPosition] = createSignal<"before" | "after">("after");
+  let pointerPayload: { requestId: string; collectionId: string; folderId?: string } | null = null;
+  let pointerStarted = false;
 
-  function handleDragStart(event: DragEvent, requestId: string, folderId?: string) {
-    dndPayload = { requestId, folderId };
+  function handleDragStart(event: DragEvent, requestId: string, collectionId: string, folderId?: string) {
+    dndPayload = { requestId, collectionId, folderId };
     setDraggingId(requestId);
     if (event.dataTransfer) {
       event.dataTransfer.effectAllowed = "move";
-      event.dataTransfer.setData("text/plain", JSON.stringify({ requestId, folderId }));
+      event.dataTransfer.setData("text/plain", JSON.stringify({ requestId, collectionId, folderId }));
     }
     (event.currentTarget as HTMLElement).classList.add("dragging");
   }
@@ -115,6 +124,7 @@ export function Sidebar(props: SidebarProps) {
     (event.currentTarget as HTMLElement).classList.remove("dragging");
     setDraggingId(null);
     setDropTargetId(null);
+    setDropPosition("after");
     // Keep payload briefly in case drop fires after dragEnd
     setTimeout(() => { dndPayload = null; }, 500);
   }
@@ -136,38 +146,189 @@ export function Sidebar(props: SidebarProps) {
     const y = event.clientY;
     if (x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) {
       setDropTargetId(null);
+      setDropPosition("after");
     }
   }
 
-  function handleDrop(event: DragEvent) {
-    event.preventDefault();
-    setDropTargetId(null);
-    setDraggingId(null);
+  function readDropPayload(event: DragEvent): { requestId: string; collectionId: string; folderId?: string } | null {
+    if (dndPayload) return dndPayload;
+    const text = event.dataTransfer?.getData("text/plain");
+    if (!text) return null;
+    try {
+      const parsed = JSON.parse(text);
+      return typeof parsed.requestId === "string" && typeof parsed.collectionId === "string" ? parsed : null;
+    } catch {
+      return null;
+    }
+  }
 
-    const payload = dndPayload;
+  function clearDragState() {
     dndPayload = null;
+    setDropTargetId(null);
+    setDropPosition("after");
+    setDraggingId(null);
+  }
 
+  function handleDrop(
+    event: DragEvent,
+    targetCollectionId: string,
+    targetFolderId?: string,
+    targetRequestId?: string,
+    position: "before" | "after" = "after",
+  ) {
+    event.preventDefault();
+    event.stopPropagation();
+
+    const payload = readDropPayload(event);
+    clearDragState();
+    if (!payload) return;
+    if (
+      payload.collectionId === targetCollectionId &&
+      payload.folderId === targetFolderId &&
+      (!targetRequestId || targetRequestId === payload.requestId)
+    ) {
+      return;
+    }
+
+    props.onMoveRequest(payload.requestId, targetCollectionId, targetFolderId, targetRequestId, position);
+  }
+
+  function handleRequestDrop(
+    event: DragEvent,
+    targetCollectionId: string,
+    targetFolderId: string | undefined,
+    targetRequestId: string,
+  ) {
+    const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+    const position = event.clientY < rect.top + rect.height / 2 ? "before" : "after";
+    handleDrop(event, targetCollectionId, targetFolderId, targetRequestId, position);
+  }
+
+  function handleRequestDragOver(event: DragEvent, targetRequestId: string) {
+    handleDragOver(event);
+    const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+    setDropTargetId(`request-${targetRequestId}`);
+    setDropPosition(event.clientY < rect.top + rect.height / 2 ? "before" : "after");
+  }
+
+  function updatePointerDropTarget(clientX: number, clientY: number) {
+    const element = document.elementFromPoint(clientX, clientY) as HTMLElement | null;
+    if (!element) {
+      setDropTargetId(null);
+      return;
+    }
+
+    const requestElement = element.closest<HTMLElement>("[data-dnd-request]");
+    if (requestElement?.dataset.dndRequest) {
+      const rect = requestElement.getBoundingClientRect();
+      setDropTargetId(`request-${requestElement.dataset.dndRequest}`);
+      setDropPosition(clientY < rect.top + rect.height / 2 ? "before" : "after");
+      return;
+    }
+
+    const folderElement = element.closest<HTMLElement>("[data-dnd-folder]");
+    if (folderElement?.dataset.dndFolder) {
+      const collectionElement = folderElement.closest<HTMLElement>("[data-dnd-collection]");
+      if (collectionElement?.dataset.dndCollection) {
+        setDropTargetId(`folder-${collectionElement.dataset.dndCollection}-${folderElement.dataset.dndFolder}`);
+        setDropPosition("after");
+        return;
+      }
+    }
+
+    const rootElement = element.closest<HTMLElement>("[data-dnd-root]");
+    if (rootElement?.dataset.dndCollection) {
+      setDropTargetId(`root-${rootElement.dataset.dndCollection}`);
+      setDropPosition("after");
+      return;
+    }
+
+    setDropTargetId(null);
+  }
+
+  function commitPointerDrop(clientX: number, clientY: number) {
+    const payload = pointerPayload;
+    clearDragState();
+    pointerPayload = null;
+    pointerStarted = false;
+    document.body.classList.remove("is-request-dragging");
     if (!payload) return;
 
-    // Find drop target element using event coordinates (more reliable than event.target in Tauri)
-    const x = event.clientX;
-    const y = event.clientY;
-    const el = document.elementFromPoint(x, y) as HTMLElement | null;
-    if (!el) return;
+    const element = document.elementFromPoint(clientX, clientY) as HTMLElement | null;
+    if (!element) return;
 
-    // Walk up to find folder or root
-    const folderEl = el.closest('[data-dnd-folder]') as HTMLElement | null;
-    const rootEl = el.closest('[data-dnd-root]') as HTMLElement | null;
-    const collectionEl = el.closest('[data-dnd-collection]') as HTMLElement | null;
+    const requestElement = element.closest<HTMLElement>("[data-dnd-request]");
+    if (requestElement?.dataset.dndRequest) {
+      const collectionElement = requestElement.closest<HTMLElement>("[data-dnd-collection]");
+      if (!collectionElement?.dataset.dndCollection) return;
+      const targetRequestId = requestElement.dataset.dndRequest;
+      if (targetRequestId === payload.requestId) return;
+      const targetFolderId = requestElement.dataset.dndRequestFolder || undefined;
+      const rect = requestElement.getBoundingClientRect();
+      const position = clientY < rect.top + rect.height / 2 ? "before" : "after";
+      props.onMoveRequest(payload.requestId, collectionElement.dataset.dndCollection, targetFolderId, targetRequestId, position);
+      return;
+    }
 
-    if (!collectionEl) return;
+    const folderElement = element.closest<HTMLElement>("[data-dnd-folder]");
+    if (folderElement?.dataset.dndFolder) {
+      const collectionElement = folderElement.closest<HTMLElement>("[data-dnd-collection]");
+      if (!collectionElement?.dataset.dndCollection) return;
+      if (payload.collectionId === collectionElement.dataset.dndCollection && payload.folderId === folderElement.dataset.dndFolder) return;
+      props.onMoveRequest(payload.requestId, collectionElement.dataset.dndCollection, folderElement.dataset.dndFolder);
+      return;
+    }
 
-    const targetFolderId = folderEl?.dataset.dndFolder || undefined;
+    const rootElement = element.closest<HTMLElement>("[data-dnd-root]");
+    if (rootElement?.dataset.dndCollection) {
+      if (payload.collectionId === rootElement.dataset.dndCollection && !payload.folderId) return;
+      props.onMoveRequest(payload.requestId, rootElement.dataset.dndCollection, undefined);
+    }
+  }
 
-    if (payload.folderId === targetFolderId) return;
-    if (!payload.folderId && !targetFolderId) return;
+  function handleRequestPointerDown(event: PointerEvent, requestId: string, collectionId: string, folderId?: string) {
+    if (event.button !== 0) return;
+    const startX = event.clientX;
+    const startY = event.clientY;
+    pointerPayload = { requestId, collectionId, folderId };
+    pointerStarted = false;
 
-    props.onMoveRequest(payload.requestId, targetFolderId);
+    const onMove = (moveEvent: PointerEvent) => {
+      if (!pointerPayload) return;
+      const distance = Math.hypot(moveEvent.clientX - startX, moveEvent.clientY - startY);
+      if (!pointerStarted && distance < 4) return;
+      pointerStarted = true;
+      moveEvent.preventDefault();
+      document.body.classList.add("is-request-dragging");
+      setDraggingId(requestId);
+      updatePointerDropTarget(moveEvent.clientX, moveEvent.clientY);
+    };
+
+    const onUp = (upEvent: PointerEvent) => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onCancel);
+      if (pointerStarted) {
+        upEvent.preventDefault();
+        commitPointerDrop(upEvent.clientX, upEvent.clientY);
+        return;
+      }
+      pointerPayload = null;
+    };
+
+    const onCancel = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onCancel);
+      pointerPayload = null;
+      pointerStarted = false;
+      clearDragState();
+      document.body.classList.remove("is-request-dragging");
+    };
+
+    window.addEventListener("pointermove", onMove, { passive: false });
+    window.addEventListener("pointerup", onUp, { once: true });
+    window.addEventListener("pointercancel", onCancel, { once: true });
   }
 
   return (
@@ -193,18 +354,27 @@ export function Sidebar(props: SidebarProps) {
       <Show when={props.sideView === "Collections"}>
         <div class="overflow-auto p-[5px] min-w-0 min-h-0"
           onDragOver={handleDragOver}
-          onDrop={handleDrop}
         >
           <For each={props.collections}>
             {(collection) => (
               <section data-dnd-collection={collection.id}>
                 {/* Collection header (not draggable, not droppable) */}
                 <div
-                  class={cn(COLLECTION_FOLDER_ROW, "cursor-pointer")}
+                  data-dnd-root=""
+                  data-dnd-collection={collection.id}
+                  class={cn(
+                    COLLECTION_FOLDER_ROW,
+                    "droppable-root cursor-pointer",
+                    dropTargetId() === `root-${collection.id}` && "drag-over",
+                  )}
                   onClick={() => props.onToggleCollection(collection.id)}
                   onContextMenu={(event) =>
                     props.onContextMenu(event, collection.name, props.collectionContextItems(collection))
                   }
+                  onDragOver={handleDragOver}
+                  onDragEnter={(e) => handleDragEnter(e, `root-${collection.id}`)}
+                  onDragLeave={handleDragLeave}
+                  onDrop={(e) => handleDrop(e, collection.id, undefined)}
                 >
                   <button
                     class={cn(
@@ -226,21 +396,15 @@ export function Sidebar(props: SidebarProps) {
                   </span>
                 </div>
 
-                <Show when={!props.collapsedCollections.has(collection.id)}>
+                    <Show when={!props.collapsedCollections.has(collection.id)}>
                   {/* Root droppable area */}
                   <div
                     data-dnd-root=""
                     data-dnd-collection={collection.id}
-                    class={cn(
-                      "min-h-[8px] transition-colors duration-150",
-                      dropTargetId() === `root-${collection.id}` && "bg-[color-mix(in_srgb,var(--primary)_12%,transparent)] border-l-2 border-[var(--primary)]",
-                    )}
+                    class={cn("droppable-root min-h-[8px]", dropTargetId() === `root-${collection.id}` && "drag-over")}
                     onDragEnter={(e) => handleDragEnter(e, `root-${collection.id}`)}
                     onDragLeave={handleDragLeave}
-                    onDrop={(e) => {
-                      e.stopPropagation();
-                      handleDrop(e);
-                    }}
+                    onDrop={(e) => handleDrop(e, collection.id, undefined)}
                   >
                     {/* Requests in root */}
                     <For each={collection.requests.filter((saved) => !saved.folder_id)}>
@@ -252,12 +416,19 @@ export function Sidebar(props: SidebarProps) {
                             draggingId() === saved.id && "dragging",
                             saved.id === props.activeRequestId &&
                               "bg-[color-mix(in_srgb,var(--primary)_11%,transparent)] shadow-[inset_2px_0_0_var(--primary)] text-[var(--text)]",
+                            dropTargetId() === `request-${saved.id}` &&
+                              (dropPosition() === "before" ? "drop-request-before" : "drop-request-after"),
                           )}
-                          draggable={true}
+                          draggable={false}
                           data-dnd-request={saved.id}
                           data-dnd-request-folder=""
-                          onDragStart={(e) => handleDragStart(e, saved.id, undefined)}
+                          onPointerDown={(e) => handleRequestPointerDown(e, saved.id, collection.id, undefined)}
+                          onDragStart={(e) => handleDragStart(e, saved.id, collection.id, undefined)}
                           onDragEnd={handleDragEnd}
+                          onDragOver={(e) => handleRequestDragOver(e, saved.id)}
+                          onDragEnter={(e) => handleDragEnter(e, `request-${saved.id}`)}
+                          onDragLeave={handleDragLeave}
+                          onDrop={(e) => handleRequestDrop(e, collection.id, undefined, saved.id)}
                           onClick={() => props.onSetActiveRequest(saved.id)}
                           onContextMenu={(event) =>
                             props.onContextMenu(event, saved.name, props.requestContextItems(saved))
@@ -294,10 +465,7 @@ export function Sidebar(props: SidebarProps) {
                           }
                           onDragEnter={(e) => handleDragEnter(e, `folder-${collection.id}-${folder.id}`)}
                           onDragLeave={handleDragLeave}
-                          onDrop={(e) => {
-                            e.stopPropagation();
-                            handleDrop(e);
-                          }}
+                          onDrop={(e) => handleDrop(e, collection.id, folder.id)}
                         >
                           <button
                             class={cn(
@@ -330,12 +498,19 @@ export function Sidebar(props: SidebarProps) {
                                   draggingId() === saved.id && "dragging",
                                   saved.id === props.activeRequestId &&
                                     "bg-[color-mix(in_srgb,var(--primary)_11%,transparent)] shadow-[inset_2px_0_0_var(--primary)] text-[var(--text)]",
+                                  dropTargetId() === `request-${saved.id}` &&
+                                    (dropPosition() === "before" ? "drop-request-before" : "drop-request-after"),
                                 )}
-                                draggable={true}
+                                draggable={false}
                                 data-dnd-request={saved.id}
                                 data-dnd-request-folder={folder.id}
-                                onDragStart={(e) => handleDragStart(e, saved.id, folder.id)}
+                                onPointerDown={(e) => handleRequestPointerDown(e, saved.id, collection.id, folder.id)}
+                                onDragStart={(e) => handleDragStart(e, saved.id, collection.id, folder.id)}
                                 onDragEnd={handleDragEnd}
+                                onDragOver={(e) => handleRequestDragOver(e, saved.id)}
+                                onDragEnter={(e) => handleDragEnter(e, `request-${saved.id}`)}
+                                onDragLeave={handleDragLeave}
+                                onDrop={(e) => handleRequestDrop(e, collection.id, folder.id, saved.id)}
                                 onClick={() => props.onSetActiveRequest(saved.id)}
                                 onContextMenu={(event) =>
                                   props.onContextMenu(event, saved.name, props.requestContextItems(saved))

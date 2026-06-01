@@ -1,6 +1,6 @@
 use crate::models::{
-    ApiKeyLocation, ApiRequest, ApiResponse, Auth, FormField, Header, HttpMethod, QueryParam,
-    RequestBody,
+    ApiKeyLocation, ApiRequest, ApiResponse, Auth, FormField, FormFieldType, Header, HttpMethod,
+    QueryParam, RequestBody,
 };
 use base64::Engine;
 use reqwest::header::{CONTENT_TYPE, HeaderMap, HeaderName, HeaderValue};
@@ -63,11 +63,7 @@ impl RestClient {
                 builder.json(&value)
             }
             RequestBody::FormData { fields } => {
-                let form = enabled_fields(fields)
-                    .into_iter()
-                    .fold(reqwest::multipart::Form::new(), |form, (key, value)| {
-                        form.text(key, value)
-                    });
+                let form = multipart_form(fields).await?;
                 builder.multipart(form)
             }
             RequestBody::UrlEncoded { fields } => {
@@ -292,6 +288,53 @@ fn enabled_fields(fields: Vec<FormField>) -> Vec<(String, String)> {
         .filter(|field| field.enabled && !field.key.trim().is_empty())
         .map(|field| (field.key.trim().to_string(), field.value))
         .collect()
+}
+
+async fn multipart_form(fields: Vec<FormField>) -> RestResult<reqwest::multipart::Form> {
+    let mut form = reqwest::multipart::Form::new();
+    for field in fields
+        .into_iter()
+        .filter(|field| field.enabled && !field.key.trim().is_empty())
+    {
+        let key = field.key.trim().to_string();
+        match field.field_type {
+            FormFieldType::Text => {
+                form = form.text(key, field.value);
+            }
+            FormFieldType::File => {
+                let path = field.file_path.as_deref().unwrap_or("").trim();
+                if path.is_empty() {
+                    return Err(RestError::Validation(format!(
+                        "multipart file field '{}' is missing a file path",
+                        field.key
+                    )));
+                }
+                let bytes = tokio::fs::read(path).await.map_err(|error| {
+                    RestError::Body(format!("failed to read file '{path}': {error}"))
+                })?;
+                let file_name = field
+                    .file_name
+                    .filter(|name| !name.trim().is_empty())
+                    .or_else(|| {
+                        std::path::Path::new(path)
+                            .file_name()
+                            .and_then(|name| name.to_str())
+                            .map(ToOwned::to_owned)
+                    })
+                    .unwrap_or_else(|| "upload.bin".to_string());
+                let mut part = reqwest::multipart::Part::bytes(bytes).file_name(file_name);
+                if let Some(content_type) =
+                    field.content_type.filter(|value| !value.trim().is_empty())
+                {
+                    part = part.mime_str(content_type.trim()).map_err(|error| {
+                        RestError::Validation(format!("invalid file content type: {error}"))
+                    })?;
+                }
+                form = form.part(key, part);
+            }
+        }
+    }
+    Ok(form)
 }
 
 fn response_headers(headers: &HeaderMap) -> Vec<Header> {

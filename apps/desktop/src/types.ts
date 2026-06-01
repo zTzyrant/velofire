@@ -10,7 +10,11 @@ export type QueryParam = Header;
 
 export interface FormField {
   key: string;
+  field_type?: "text" | "file";
   value: string;
+  file_path?: string;
+  file_name?: string;
+  content_type?: string;
   enabled: boolean;
 }
 
@@ -72,6 +76,7 @@ export interface Collection {
   requests: SavedRequest[];
   created_at?: string;
   updated_at?: string;
+  metadata?: Record<string, string>;
 }
 
 export interface CollectionFolder {
@@ -79,6 +84,7 @@ export interface CollectionFolder {
   name: string;
   parent_id?: string;
   sort_order: number;
+  metadata?: Record<string, string>;
 }
 
 export interface SavedRequest {
@@ -136,6 +142,7 @@ export interface ExecuteRequestInput {
   environment?: Environment;
   root_path?: string;
   save_history?: boolean;
+  allow_node_scripts?: boolean;
 }
 
 export interface ExecuteRequestOutput {
@@ -143,6 +150,7 @@ export interface ExecuteRequestOutput {
   response: ApiResponse;
   history?: RequestHistoryEntry;
   script_log: string[];
+  environment_updates?: Record<string, string>;
 }
 
 export interface RequestHistoryItem {

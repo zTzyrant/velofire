@@ -15,6 +15,7 @@ import {
   loadHistory,
   saveCollection,
   saveEnvironment,
+  pickFolder,
 } from "./services/commands";
 import type {
   ApiRequest,
@@ -33,6 +34,7 @@ import { Topbar, type AppMenuGroup } from "./components/layout/Topbar";
 import { Sidebar } from "./components/sidebar/Sidebar";
 import { MainPanel } from "./components/layout/MainPanel";
 import { CommandPalette, type CommandAction } from "./components/common/CommandPalette";
+import { ConsoleDrawer, type ConsoleLogItem, type ConsoleLogLevel } from "./components/common/ConsoleDrawer";
 import AboutDialog from "./components/common/AboutDialog";
 import GenericDialog, { type DialogState } from "./components/common/GenericDialog";
 import { AppContextMenu, type ContextMenuItem, type ContextMenuState } from "./components/common/AppContextMenu";
@@ -41,6 +43,10 @@ import "./styles.css";
 
 type SideView = "Collections" | "History" | "Environments" | "Imports";
 type ResponsePlacement = "bottom" | "right";
+type ResourceSelection =
+  | { type: "request"; requestId: string }
+  | { type: "collection"; collectionId: string }
+  | { type: "folder"; collectionId: string; folderId: string };
 
 const workspaceStorageKey = "velofire:workspace";
 const recentWorkspacesStorageKey = "velofire:recent-workspaces";
@@ -79,6 +85,7 @@ function defaultCollection(): Collection {
     name: "Scratch",
     folders: [],
     requests: [savedRequest(request, collectionId)],
+    metadata: {},
   };
 }
 
@@ -89,6 +96,25 @@ function savedRequest(request: ApiRequest, collectionId?: string, folderId?: str
     folder_id: folderId,
     name: request.name ?? "Untitled",
     request: { ...request, path: folderId ? request.path : [] },
+  };
+}
+
+function metadataVariables(metadata: Record<string, string> | undefined): EnvironmentVariable[] {
+  return Object.entries(metadata ?? {})
+    .filter(([key]) => key.startsWith("variable."))
+    .map(([key, value]) => ({
+      key: key.slice("variable.".length),
+      value,
+      is_secret: false,
+      enabled: true,
+    }))
+    .filter((variable) => variable.key.trim());
+}
+
+function mergeScripts(...scripts: Array<{ pre_request?: string; post_request?: string } | undefined>) {
+  return {
+    pre_request: scripts.map((script) => script?.pre_request?.trim()).filter(Boolean).join("\n"),
+    post_request: scripts.map((script) => script?.post_request?.trim()).filter(Boolean).join("\n"),
   };
 }
 
@@ -139,6 +165,68 @@ function notifyMessage(message: string) {
   toast.info(message, options);
 }
 
+function logLevelForMessage(message: string): ConsoleLogLevel {
+  const lower = message.toLowerCase();
+  if (lower.includes("failed") || lower.includes("error") || lower.includes("blocked")) return "error";
+  if (lower.includes("warning") || lower.includes("invalid") || lower.includes("missing")) return "warning";
+  return "info";
+}
+
+function formatHeaders(headers: { key: string; value: string; enabled?: boolean }[]): string {
+  return headers
+    .filter((header) => header.enabled !== false)
+    .map((header) => `${header.key}: ${header.value}`)
+    .join("\n");
+}
+
+function formatRequestBody(body: ApiRequest["body"]): string {
+  if (body.type === "none") return "<none>";
+  if (body.type === "json") return typeof body.value === "string" ? body.value : JSON.stringify(body.value, null, 2);
+  if (body.type === "raw_text" || body.type === "xml") return body.value;
+  return body.fields
+    .filter((field) => field.enabled && field.key.trim())
+    .map((field) => {
+      if (body.type === "form_data" && (field.field_type ?? "text") === "file") {
+        return `${field.key}=<file:${field.file_name || field.file_path || "selected"}>`;
+      }
+      return `${field.key}=${field.value}`;
+    })
+    .join("\n");
+}
+
+function formatNetworkRequest(request: ApiRequest): string {
+  return [
+    `${request.method.toUpperCase()} ${request.url}`,
+    "",
+    "Request Headers",
+    formatHeaders(request.headers) || "<none>",
+    "",
+    "Request Body",
+    formatRequestBody(request.body),
+  ].join("\n");
+}
+
+function networkLogMessage(request: ApiRequest, response: ApiResponse): string {
+  return `${request.method.toUpperCase()} ${response.final_url || request.url}`;
+}
+
+function formatNetworkExchange(request: ApiRequest, response: ApiResponse): string {
+  return [
+    formatNetworkRequest(request),
+    "",
+    `Response ${response.status} ${response.status_text}`,
+    `Final URL: ${response.final_url}`,
+    `Duration: ${response.duration_ms}ms`,
+    `Body bytes: ${response.body_bytes_len}${response.body_truncated ? " (truncated)" : ""}`,
+    "",
+    "Response Headers",
+    formatHeaders(response.headers) || "<none>",
+    "",
+    "Response Body",
+    response.body_text || "<empty>",
+  ].join("\n");
+}
+
 function readRecentWorkspacePaths(): string[] {
   const current = localStorage.getItem(workspaceStorageKey);
   try {
@@ -180,6 +268,7 @@ function historyItemFromEntry(entry: RequestHistoryEntry): RequestHistoryItem {
 function App() {
   const [sideView, setSideView] = createSignal<SideView>("Collections");
   const [commandPaletteOpen, setCommandPaletteOpen] = createSignal(false);
+  const [consoleOpen, setConsoleOpen] = createSignal(false);
   const [aboutOpen, setAboutOpen] = createSignal(false);
   const [dialog, setDialog] = createSignal<DialogState | null>(null);
   const initialRecentWorkspaces = readRecentWorkspacePaths();
@@ -187,6 +276,10 @@ function App() {
   const [recentWorkspaces, setRecentWorkspaces] = createSignal(initialRecentWorkspaces);
   const [collections, setCollections] = createSignal<Collection[]>([defaultCollection()]);
   const [activeRequestId, setActiveRequestId] = createSignal(collections()[0].requests[0].id);
+  const [resourceSelection, setResourceSelection] = createSignal<ResourceSelection>({
+    type: "request",
+    requestId: collections()[0].requests[0].id,
+  });
   const [sidebarVisible, setSidebarVisible] = createSignal(true);
   const [inspectorVisible, setInspectorVisible] = createSignal(true);
   const [responsePlacement, setResponsePlacement] = createSignal<ResponsePlacement>("bottom");
@@ -195,6 +288,7 @@ function App() {
   const [response, setResponse] = createSignal<ApiResponse | null>(null);
   const [loading, setLoading] = createSignal(false);
   const [message, setMessage] = createSignal<string | null>(null);
+  const [consoleLogs, setConsoleLogs] = createSignal<ConsoleLogItem[]>([]);
   const [history, setHistory] = createSignal<RequestHistoryItem[]>([]);
   const [importText, setImportText] = createSignal("");
   const [lastImportReport, setLastImportReport] = createSignal<ImportReport | null>(null);
@@ -222,6 +316,48 @@ function App() {
       if (saved) return { collection, saved };
     }
     return undefined;
+  });
+
+  const inheritedVariables = createMemo<EnvironmentVariable[]>(() => {
+    const active = activeSavedRequest();
+    if (!active) return environment();
+    const folder = active.saved.folder_id
+      ? active.collection.folders.find((item) => item.id === active.saved.folder_id)
+      : undefined;
+    const merged = new Map<string, EnvironmentVariable>();
+    for (const variable of [
+      ...metadataVariables(active.collection.metadata),
+      ...metadataVariables(folder?.metadata),
+      ...metadataVariables(active.saved.request.metadata),
+      ...environment(),
+    ]) {
+      if (!variable.enabled || !variable.key.trim()) continue;
+      merged.set(variable.key, variable);
+    }
+    return [...merged.values()];
+  });
+  const executableRequest = createMemo<ApiRequest>(() => {
+    const active = activeSavedRequest();
+    const request = currentRequest();
+    if (!active) return request;
+    const folder = active.saved.folder_id
+      ? active.collection.folders.find((item) => item.id === active.saved.folder_id)
+      : undefined;
+    const collectionScripts = {
+      pre_request: active.collection.metadata?.pre_request_script,
+      post_request: active.collection.metadata?.post_request_script,
+    };
+    const folderScripts = {
+      pre_request: folder?.metadata?.pre_request_script,
+      post_request: folder?.metadata?.post_request_script,
+    };
+    const scripts = mergeScripts(collectionScripts, folderScripts, request.scripts);
+    const inheritedMetadata = {
+      ...(active.collection.metadata ?? {}),
+      ...(folder?.metadata ?? {}),
+      ...(request.metadata ?? {}),
+    };
+    return { ...request, metadata: inheritedMetadata, scripts };
   });
 
   const commandActions = createMemo<CommandAction[]>(() => [
@@ -293,6 +429,7 @@ function App() {
       label: "Workspace",
       items: [
         { label: "Init Workspace", run: onInitWorkspace },
+        { label: "Open Workspace", run: onOpenWorkspace },
         { label: "Load Collections", run: () => onLoadCollections() },
         { label: "Save Collection", run: onSaveActiveCollection },
         { label: "Load Environments", run: onLoadEnvironments },
@@ -316,8 +453,54 @@ function App() {
     if (currentMessage && currentMessage !== lastNotifiedMessage) {
       lastNotifiedMessage = currentMessage;
       notifyMessage(currentMessage);
+      setConsoleLogs((items) => [
+        {
+          id: id("log"),
+          level: logLevelForMessage(currentMessage),
+          message: currentMessage,
+          timestamp: new Date().toLocaleTimeString(),
+        },
+        ...items.slice(0, 199),
+      ]);
     }
   });
+
+  function appendConsoleLog(level: ConsoleLogLevel, message: string, detail?: string, meta: Partial<ConsoleLogItem> = {}) {
+    setConsoleLogs((items) => [
+      {
+        id: id("log"),
+        level,
+        message,
+        detail,
+        timestamp: new Date().toLocaleTimeString(),
+        ...meta,
+      },
+      ...items.slice(0, 199),
+    ]);
+  }
+
+  async function copyLogDetail(item: ConsoleLogItem) {
+    const content = item.detail ?? "";
+    if (!content) {
+      setMessage("Copy failed: no log detail available.");
+      return;
+    }
+    const estimatedRamMb = Math.max(0.01, (content.length * 2) / 1024 / 1024);
+    if (content.length > 100_000) {
+      const confirmed = await askConfirm(
+        "Copy Large Network Log",
+        `This will copy about ${Math.ceil(content.length / 1024)} KB of text. Estimated temporary RAM usage is ${estimatedRamMb.toFixed(2)} MB. Continue?`,
+        "Copy",
+      );
+      if (!confirmed) return;
+    }
+    try {
+      await navigator.clipboard.writeText(content);
+      setMessage(`Copied log details. Estimated temporary RAM usage ${estimatedRamMb.toFixed(2)} MB.`);
+    } catch (err) {
+      setMessage(`Copy failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
 
   onMount(() => {
     void onLoadHistory(workspacePath(), false);
@@ -475,6 +658,28 @@ function App() {
     );
   }
 
+  function selectRequest(requestId: string) {
+    setActiveRequestId(requestId);
+    setResourceSelection({ type: "request", requestId });
+  }
+
+  function updateCollectionMetadata(collectionId: string, metadata: Record<string, string>) {
+    setCollections((items) => items.map((item) => (item.id === collectionId ? { ...item, metadata } : item)));
+  }
+
+  function updateFolderMetadata(collectionId: string, folderId: string, metadata: Record<string, string>) {
+    setCollections((items) =>
+      items.map((item) =>
+        item.id === collectionId
+          ? {
+              ...item,
+              folders: item.folders.map((folder) => (folder.id === folderId ? { ...folder, metadata } : folder)),
+            }
+          : item,
+      ),
+    );
+  }
+
   async function newCollection() {
     const collection = defaultCollection();
     const name = await askText("New Collection", "Collection name", `Collection ${collections().length + 1}`, "Create");
@@ -494,7 +699,7 @@ function App() {
     if (!collection) return;
     const name = await askText("New Folder", "Folder name", `Folder ${collection.folders.length + 1}`, "Create");
     if (!name) return;
-    const folder: CollectionFolder = { id: id("folder"), name, sort_order: collection.folders.length };
+    const folder: CollectionFolder = { id: id("folder"), name, sort_order: collection.folders.length, metadata: {} };
     setCollections((items) =>
       items.map((item) => item.id === collectionId ? { ...item, folders: [...item.folders, folder] } : item),
     );
@@ -634,31 +839,83 @@ function App() {
 
   function deleteRequest(requestId: string) { setActiveRequestId(requestId); void deleteActiveRequest(); }
 
-  function moveRequest(requestId: string, folderId?: string) {
-    const collection = collections().find((c) => c.requests.some((s) => s.id === requestId));
-    if (!collection) return;
-    const folder = folderId ? collection.folders.find((f) => f.id === folderId) : undefined;
+  function moveRequest(
+    requestId: string,
+    targetCollectionId: string,
+    folderId?: string,
+    targetRequestId?: string,
+    position: "before" | "after" = "after",
+  ) {
+    const sourceCollection = collections().find((c) => c.requests.some((s) => s.id === requestId));
+    const targetCollection = collections().find((c) => c.id === targetCollectionId);
+    const sourceRequest = sourceCollection?.requests.find((s) => s.id === requestId);
+    if (!sourceCollection || !targetCollection || !sourceRequest) return;
+    if (targetRequestId === requestId) return;
+
+    const targetFolder = folderId ? targetCollection.folders.find((f) => f.id === folderId) : undefined;
+    if (folderId && !targetFolder) return;
+
+    const movedRequest: SavedRequest = {
+      ...sourceRequest,
+      collection_id: targetCollection.id,
+      folder_id: targetFolder?.id,
+      request: {
+        ...sourceRequest.request,
+        path: targetFolder ? [targetCollection.name, targetFolder.name] : [targetCollection.name],
+      },
+    };
+
+    const insertRequest = (requests: SavedRequest[]) => {
+      const withoutMoved = requests.filter((saved) => saved.id !== requestId);
+      if (!targetRequestId) return [...withoutMoved, movedRequest];
+
+      const targetIndex = withoutMoved.findIndex((saved) => saved.id === targetRequestId);
+      if (targetIndex < 0) return [...withoutMoved, movedRequest];
+
+      const insertIndex = position === "before" ? targetIndex : targetIndex + 1;
+      return [
+        ...withoutMoved.slice(0, insertIndex),
+        movedRequest,
+        ...withoutMoved.slice(insertIndex),
+      ];
+    };
+
     setCollections((items) =>
-      items.map((c) =>
-        c.id === collection.id
-          ? {
-              ...c,
-              requests: c.requests.map((s) =>
-                s.id === requestId
-                  ? { ...s, folder_id: folder?.id, request: { ...s.request, path: folder ? [c.name, folder.name] : [c.name] } }
-                  : s,
-              ),
-            }
-          : c,
-      ),
+      items.map((collection) => {
+        if (collection.id === sourceCollection.id && collection.id === targetCollection.id) {
+          return {
+            ...collection,
+            requests: insertRequest(collection.requests),
+          };
+        }
+        if (collection.id === sourceCollection.id) {
+          return { ...collection, requests: collection.requests.filter((saved) => saved.id !== requestId) };
+        }
+        if (collection.id === targetCollection.id) {
+          return { ...collection, requests: insertRequest(collection.requests) };
+        }
+        return collection;
+      }),
     );
-    setMessage(folder ? `Moved request to ${folder.name}.` : "Moved request to collection root.");
+    setActiveRequestId(requestId);
+    const sameParent = sourceCollection.id === targetCollection.id && sourceRequest.folder_id === targetFolder?.id;
+    setMessage(
+      sameParent
+        ? `Reordered request in ${targetFolder ? `${targetCollection.name} / ${targetFolder.name}` : `${targetCollection.name} root`}.`
+        : targetFolder
+          ? `Moved request to ${targetCollection.name} / ${targetFolder.name}.`
+          : `Moved request to ${targetCollection.name} root.`,
+    );
   }
 
-  function moveRequestToRoot(requestId: string) { moveRequest(requestId, undefined); }
+  function moveRequestToRoot(requestId: string) {
+    const collection = collections().find((item) => item.requests.some((request) => request.id === requestId));
+    if (collection) moveRequest(requestId, collection.id, undefined);
+  }
 
   function requestContextItems(saved: SavedRequest): ContextMenuItem[] {
     return [
+      { label: "Open settings", run: () => { selectRequest(saved.id); setResourceSelection({ type: "request", requestId: saved.id }); } },
       { label: "Rename", run: () => renameRequest(saved.id) },
       { label: "Duplicate", run: () => duplicateRequest(saved.id) },
       { label: "Move to root", disabled: !saved.folder_id, run: () => moveRequestToRoot(saved.id) },
@@ -669,6 +926,7 @@ function App() {
 
   function collectionContextItems(collection: Collection): ContextMenuItem[] {
     return [
+      { label: "Open overview", run: () => setResourceSelection({ type: "collection", collectionId: collection.id }) },
       { label: "New request", run: () => newRequest(collection.id) },
       { label: "New folder", run: () => newFolder(collection.id) },
       { label: "Rename", run: () => renameCollection(collection.id) },
@@ -678,6 +936,7 @@ function App() {
 
   function folderContextItems(collection: Collection, folder: CollectionFolder): ContextMenuItem[] {
     return [
+      { label: "Open overview", run: () => setResourceSelection({ type: "folder", collectionId: collection.id, folderId: folder.id }) },
       { label: "New request", run: () => newRequest(collection.id, folder.id) },
       { label: "Rename", run: () => renameFolder(collection.id, folder.id) },
       { label: "Delete", danger: true, run: () => deleteFolder(collection.id, folder.id) },
@@ -710,16 +969,61 @@ function App() {
   async function onSend() {
     setLoading(true); setMessage(null);
     try {
-      const request = currentRequest();
-      const activeEnvironment: Environment = { id: environmentId(environmentName()), name: environmentName().trim() || "Local", variables: environment() };
-      const result = await executeRequest({ request, environment: activeEnvironment, root_path: workspacePath(), save_history: true });
+      const request = executableRequest();
+      const activeEnvironment: Environment = { id: environmentId(environmentName()), name: environmentName().trim() || "Local", variables: inheritedVariables() };
+      const usesNodeScripts = request.metadata?.script_runtime === "node" && Boolean(request.scripts?.pre_request || request.scripts?.post_request);
+      if (usesNodeScripts) {
+        const confirmed = await askConfirm(
+          "Enable Node.js Scripts",
+          "This request will run local Node.js script code with access to Node modules such as crypto. Only continue for collections you trust.",
+          "Run Script",
+        );
+        if (!confirmed) return;
+      }
+      const result = await executeRequest({
+        request,
+        environment: activeEnvironment,
+        root_path: workspacePath(),
+        save_history: true,
+        allow_node_scripts: usesNodeScripts,
+      });
       setResponse(result.response);
+      appendConsoleLog(
+        "network",
+        networkLogMessage(result.request, result.response),
+        formatNetworkExchange(result.request, result.response),
+        {
+          status: result.response.status,
+          durationMs: result.response.duration_ms,
+          sizeBytes: result.response.body_bytes_len,
+        },
+      );
+      const environmentUpdates = Object.entries(result.environment_updates ?? {});
+      if (environmentUpdates.length > 0) {
+        setEnvironment((items) => {
+          const next = [...items];
+          for (const [key, value] of environmentUpdates) {
+            const existingIndex = next.findIndex((variable) => variable.key === key);
+            if (existingIndex >= 0) {
+              next[existingIndex] = { ...next[existingIndex], value, enabled: true };
+            } else {
+              next.push({ key, value, is_secret: false, enabled: true });
+            }
+          }
+          return next;
+        });
+        appendConsoleLog("info", `Updated runtime variable(s): ${environmentUpdates.map(([key]) => key).join(", ")}`);
+      }
       if (result.script_log.length > 0) setMessage(result.script_log.join("\n"));
       setHistory((items) => [
         { id: result.history?.id ?? id("history"), name: request.name ?? request.url, request: result.request, response: result.response, status: result.response.status, duration_ms: result.response.duration_ms, created_at: result.history?.created_at ?? new Date().toLocaleTimeString() },
         ...items.slice(0, 49),
       ]);
-    } catch (err) { setMessage(err instanceof Error ? err.message : String(err)); }
+    } catch (err) {
+      const error = err instanceof Error ? err.message : String(err);
+      appendConsoleLog("error", `Request failed: ${error}`);
+      setMessage(error);
+    }
     finally { setLoading(false); }
   }
 
@@ -733,6 +1037,13 @@ function App() {
       return next;
     });
     return normalized;
+  }
+
+  async function onOpenWorkspace() {
+    const selected = await pickFolder();
+    if (!selected) return;
+    await onLoadCollections(selected);
+    await onLoadEnvironments();
   }
 
   async function onLoadCollections(path = workspacePath()) {
@@ -873,7 +1184,7 @@ function App() {
   return (
     <div class="app-shell">
       <div class="toast-root">
-        <Toaster theme="dark" position="top-right" richColors={false} closeButton visibleToasts={4}
+        <Toaster theme="dark" position="bottom-right" richColors={false} closeButton visibleToasts={4}
           toastOptions={{ class: "velofire-toast", classes: { toast: "velofire-toast", title: "velofire-toast-title", description: "velofire-toast-description", closeButton: "velofire-toast-close" } }} />
       </div>
 
@@ -881,10 +1192,15 @@ function App() {
       <AboutDialog open={aboutOpen()} onClose={() => setAboutOpen(false)} />
       <GenericDialog state={dialog()} onClose={closeDialog} />
       <AppContextMenu state={contextMenu()} onRunItem={runContextMenuItem} />
-
-      <Topbar
-        appMenuGroups={appMenuGroups()} onSend={onSend} loading={loading()}
+      <ConsoleDrawer
+        open={consoleOpen()}
+        logs={consoleLogs()}
+        onToggle={() => setConsoleOpen((open) => !open)}
+        onClear={() => setConsoleLogs([])}
+        onCopyLogDetail={copyLogDetail}
       />
+
+      <Topbar appMenuGroups={appMenuGroups()} />
 
       <main class="workspace" style={{ "grid-template-columns": sidebarVisible() ? `${sidebarWidth()}px 6px minmax(0, 1fr)` : "minmax(0, 1fr)" }}>
         <Show when={sidebarVisible()}>
@@ -893,7 +1209,7 @@ function App() {
             collapsedCollections={collapsedCollections()} collapsedFolders={collapsedFolders()}
             history={history()} environmentName={environmentName()} environment={environment()}
             savedEnvironments={savedEnvironments()} importText={importText()} lastImportReport={lastImportReport()}
-            onToggleCollection={toggleCollection} onToggleFolder={toggleFolder} onSetActiveRequest={setActiveRequestId}
+            onToggleCollection={toggleCollection} onToggleFolder={toggleFolder} onSetActiveRequest={selectRequest}
             onNewCollection={() => newCollection()} onNewRequest={(cid, fid) => newRequest(cid, fid)}
             onContextMenu={openContextMenu} requestContextItems={requestContextItems}
             collectionContextItems={collectionContextItems} folderContextItems={folderContextItems}
@@ -914,7 +1230,11 @@ function App() {
           currentRequest={currentRequest()}
           responsePlacement={responsePlacement()} responsePercent={responsePercent()}
           response={response()} message={message()} loading={loading()}
-          environmentName={environmentName()} environmentVariables={environment()}
+          environmentName={environmentName()} environmentVariables={inheritedVariables()}
+          resourceSelection={resourceSelection()} collections={collections()}
+          onSelectRequest={selectRequest}
+          onUpdateCollectionMetadata={updateCollectionMetadata}
+          onUpdateFolderMetadata={updateFolderMetadata}
           onSend={onSend} onUpdateRequest={updateRequest}
           onStartResponseResize={startResponseResize}
         />

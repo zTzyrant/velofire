@@ -103,6 +103,7 @@ fn export_collection_yaml(collection: Collection) -> Result<String, String> {
 
 fn main() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             send_request,
             execute_request,

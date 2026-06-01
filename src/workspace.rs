@@ -1,7 +1,7 @@
 use crate::http_engine::mask_sensitive_headers;
 use crate::models::{
-    ApiRequest, ApiResponse, Auth, Collection, Environment, EnvironmentVariable, FormField, Header,
-    RequestBody, RequestHistoryEntry, SavedRequest, Workspace,
+    ApiRequest, ApiResponse, Auth, Collection, Environment, EnvironmentVariable, FormField,
+    FormFieldType, Header, RequestBody, RequestHistoryEntry, SavedRequest, Workspace,
 };
 use std::collections::BTreeMap;
 use std::fs;
@@ -140,6 +140,7 @@ impl FileWorkspaceStore {
         let mut request_snapshot = request.clone();
         request_snapshot.headers = mask_sensitive_headers(&request_snapshot.headers);
         request_snapshot.auth = sanitize_auth(&request_snapshot.auth);
+        request_snapshot.body = sanitize_body_file_paths(&request_snapshot.body);
         let entry = RequestHistoryEntry {
             id: stable_id("history", &format!("{now}:{}", request.url)),
             workspace_id,
@@ -247,6 +248,7 @@ pub fn sanitize_collection_secrets(collection: &Collection) -> Collection {
     for saved in &mut collection.requests {
         saved.request.headers = crate::http_engine::mask_sensitive_headers(&saved.request.headers);
         saved.request.auth = sanitize_auth(&saved.request.auth);
+        saved.request.body = sanitize_body_file_paths(&saved.request.body);
     }
     collection
 }
@@ -277,6 +279,27 @@ fn sanitize_auth(auth: &Auth) -> Auth {
             value: "********".to_string(),
             location: location.clone(),
         },
+    }
+}
+
+fn sanitize_body_file_paths(body: &RequestBody) -> RequestBody {
+    match body {
+        RequestBody::FormData { fields } => RequestBody::FormData {
+            fields: fields
+                .iter()
+                .map(|field| {
+                    let mut sanitized = field.clone();
+                    if sanitized.field_type == FormFieldType::File {
+                        sanitized.file_path = sanitized
+                            .file_path
+                            .as_ref()
+                            .map(|_| "<local-file-path-redacted>".to_string());
+                    }
+                    sanitized
+                })
+                .collect(),
+        },
+        other => other.clone(),
     }
 }
 
@@ -385,7 +408,23 @@ fn resolve_fields(
         .map(|field| {
             Ok(FormField {
                 key: resolve_template(&field.key, variables)?,
+                field_type: field.field_type.clone(),
                 value: resolve_template(&field.value, variables)?,
+                file_path: field
+                    .file_path
+                    .as_ref()
+                    .map(|value| resolve_template(value, variables))
+                    .transpose()?,
+                file_name: field
+                    .file_name
+                    .as_ref()
+                    .map(|value| resolve_template(value, variables))
+                    .transpose()?,
+                content_type: field
+                    .content_type
+                    .as_ref()
+                    .map(|value| resolve_template(value, variables))
+                    .transpose()?,
                 enabled: field.enabled,
             })
         })
@@ -411,6 +450,7 @@ pub fn collection_from_request(name: impl Into<String>, request: ApiRequest) -> 
         }],
         created_at: None,
         updated_at: None,
+        metadata: crate::models::Metadata::new(),
     }
 }
 

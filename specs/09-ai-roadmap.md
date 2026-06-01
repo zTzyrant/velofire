@@ -82,6 +82,13 @@ Phase 2:
 - GraphQL query builder.
 - GraphQL schema explorer.
 - WebSocket client.
+- Socket.IO client.
+- gRPC client.
+- MQTT client.
+- Multipart file upload.
+- Bottom console drawer with request/script/network logs.
+- JSON formatter, JSON linting, and common variable/key suggestions.
+- User settings for suggestion language/locale.
 - Mock server.
 - Request chaining.
 - Testing engine.

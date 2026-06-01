@@ -46,12 +46,15 @@ Harus mendukung:
 - URL Encoded.
 - Raw Text.
 - XML.
+- Multipart file upload.
 
 Acceptance notes:
 
 - Body editor mengikuti tipe yang dipilih.
 - JSON bisa pretty format.
 - Content-Type bisa disarankan otomatis, tetapi user tetap bisa override.
+- File upload butuh model field berbeda dari text field: `text` vs `file`, path lokal, content type opsional, dan masking path bila perlu.
+- File upload harus dikirim dari Rust backend, bukan frontend browser fetch.
 
 ## 4. Authentication
 
@@ -74,12 +77,15 @@ Harus mendukung:
 - Folder structure.
 - Save request.
 - Organize request.
+- Reorder request dengan drag/drop di dalam root collection, folder, dan antar folder.
 
 Acceptance notes:
 
 - Koleksi bisa digunakan lokal tanpa cloud.
 - Struktur file harus Git-friendly jika disimpan sebagai file.
 - UI sidebar bisa browse koleksi dan membuka request.
+- Drag/drop reorder harus pointer-based dan memberi indikator posisi sebelum/sesudah target row.
+- Collapse collection/folder tidak boleh terpicu hanya karena user sedang drag request.
 
 ## 6. Environment Variables
 
@@ -150,3 +156,34 @@ Acceptance notes:
 - JSON invalid tetap bisa dilihat sebagai raw.
 - Large response tidak boleh membuat UI freeze.
 - Status code tampil sebagai chip yang mudah dipindai.
+
+## 11. Console Drawer
+
+Harus mendukung:
+
+- Drawer bawah seperti developer console.
+- Log level: info, warning, error.
+- Timestamp.
+- Clear log.
+- Log request lifecycle, script log, variable resolution warning, dan network errors.
+
+Acceptance notes:
+
+- Console tidak menggantikan response viewer.
+- Console harus bisa dibuka/tutup tanpa mengubah layout utama.
+
+## 12. Advanced Request Types
+
+Target bertahap setelah REST stabil:
+
+- GraphQL.
+- WebSocket.
+- Socket.IO.
+- gRPC.
+- MQTT.
+
+Acceptance notes:
+
+- Setiap tipe request harus punya model, editor, executor, dan response/event viewer sendiri.
+- Jangan memaksa semua protokol masuk ke `HttpMethod`.
+- REST tetap default dan paling ringan.

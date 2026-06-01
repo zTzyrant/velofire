@@ -191,6 +191,26 @@ export async function importOpenApi(content: string): Promise<ImportReport> {
   return invoke<ImportReport>("import_openapi", { content });
 }
 
+export async function pickFile(): Promise<string | null> {
+  if (!("__TAURI_INTERNALS__" in window)) return null;
+  const dialog = await import("@tauri-apps/plugin-dialog");
+  const selected = await dialog.open({
+    multiple: false,
+    directory: false,
+  });
+  return typeof selected === "string" ? selected : null;
+}
+
+export async function pickFolder(): Promise<string | null> {
+  if (!("__TAURI_INTERNALS__" in window)) return null;
+  const dialog = await import("@tauri-apps/plugin-dialog");
+  const selected = await dialog.open({
+    multiple: false,
+    directory: true,
+  });
+  return typeof selected === "string" ? selected : null;
+}
+
 function collectionToYaml(value: unknown, indent = 0): string {
   const pad = " ".repeat(indent);
   if (Array.isArray(value)) {
@@ -236,8 +256,21 @@ function sanitizeCollection(collection: Collection): Collection {
           isSensitiveName(header.key) ? { ...header, value: "********" } : header,
         ),
         auth: sanitizeAuth(saved.request.auth),
+        body: sanitizeBody(saved.request.body),
       },
     })),
+  };
+}
+
+function sanitizeBody(body: ApiRequest["body"]): ApiRequest["body"] {
+  if (body.type !== "form_data") return body;
+  return {
+    ...body,
+    fields: body.fields.map((field) =>
+      (field.field_type ?? "text") === "file"
+        ? { ...field, file_path: field.file_path ? "<local-file-path-redacted>" : field.file_path }
+        : field,
+    ),
   };
 }
 

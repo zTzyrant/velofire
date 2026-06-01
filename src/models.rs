@@ -29,6 +29,8 @@ pub struct Collection {
     pub created_at: Option<String>,
     #[serde(default)]
     pub updated_at: Option<String>,
+    #[serde(default)]
+    pub metadata: Metadata,
 }
 
 impl Collection {
@@ -42,6 +44,7 @@ impl Collection {
             requests: Vec::new(),
             created_at: None,
             updated_at: None,
+            metadata: Metadata::new(),
         }
     }
 }
@@ -54,6 +57,8 @@ pub struct CollectionFolder {
     pub parent_id: Option<String>,
     #[serde(default)]
     pub sort_order: i32,
+    #[serde(default)]
+    pub metadata: Metadata,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -228,9 +233,25 @@ pub enum RequestBody {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FormField {
     pub key: String,
+    #[serde(default)]
+    pub field_type: FormFieldType,
     pub value: String,
+    #[serde(default)]
+    pub file_path: Option<String>,
+    #[serde(default)]
+    pub file_name: Option<String>,
+    #[serde(default)]
+    pub content_type: Option<String>,
     #[serde(default = "default_true")]
     pub enabled: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum FormFieldType {
+    #[default]
+    Text,
+    File,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]

@@ -130,6 +130,18 @@ Aturan:
 
 ## Komponen
 
+## Frontend Styling Stack
+
+Implementasi desktop saat ini memakai SolidJS, Tailwind CSS v4, dan shadcn-style local primitives di `apps/desktop/src/components/ui`.
+
+Aturan:
+
+- Prioritaskan utility class Tailwind di komponen untuk spacing, layout, typography, border, dan state sederhana.
+- Gunakan `styles.css` untuk design tokens, CSS variables, app-level layout, native Tauri window region, scrollbar, split-pane behavior, dan interaksi yang sulit dibaca jika ditulis sebagai utility panjang.
+- Komponen reusable harus mengambil primitive lokal seperti `Button`, `Dialog`, `Dropdown`, `ContextMenu`, `Select`, dan `Tabs` dari `components/ui`.
+- Jangan mengganti palette tanpa perubahan eksplisit di `DESIGN.md`.
+- Jangan menambah CSS framework lain untuk MVP.
+
 Buttons:
 
 - Primary memakai accent color.
@@ -169,6 +181,7 @@ Lists:
 - Padding kiri/kanan minimal.
 - Hover state halus.
 - Selected state jelas tetapi tidak terlalu terang.
+- Reorder list di sidebar memakai pointer-based drag/drop agar stabil di Tauri WebView. Jangan kembali ke native HTML5 `draggable` untuk reorder request kecuali ada alasan teknis yang terukur.
 
 ## UX Rules
 

@@ -189,6 +189,12 @@ kbd {
   cursor: col-resize;
 }
 
+.is-request-dragging,
+.is-request-dragging * {
+  user-select: none;
+  cursor: grabbing !important;
+}
+
 /* RequestEditorTabs styles */
 .editor-grid {
   display: grid;
@@ -551,11 +557,23 @@ aside.panel {
 
 .script-editor {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
+  grid-template-columns: repeat(2, minmax(260px, 1fr));
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 8px;
   min-height: 0;
   height: 100%;
   padding: 10px;
+}
+
+.script-toolbar {
+  grid-column: 1 / -1;
+  display: flex;
+  min-width: 0;
+  align-items: end;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid var(--outline-soft);
+  padding-bottom: 8px;
 }
 
 .script-editor .field-stack {
@@ -563,6 +581,51 @@ aside.panel {
   display: flex;
   flex-direction: column;
   height: 100%;
+}
+
+.resource-request-row {
+  display: grid;
+  grid-template-columns: 54px minmax(140px, 220px) minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  min-width: 0;
+  min-height: 34px;
+  border: 1px solid var(--outline-soft);
+  border-radius: 6px;
+  background: var(--surface-lowest);
+  color: var(--text);
+  padding: 0 10px;
+  text-align: left;
+}
+
+.resource-request-row:hover {
+  border-color: var(--primary-strong);
+  background: var(--surface-high);
+}
+
+.resource-request-row span {
+  color: var(--success);
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.resource-request-row strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+
+.resource-request-row code {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-muted);
+  font-family: var(--mono);
+  font-size: 11px;
 }
 
 /* ResponseViewer styles */
@@ -812,6 +875,63 @@ aside.panel {
   app-region: drag;
 }
 
+[data-tauri-drag-region="false"],
+button,
+input,
+select,
+textarea {
+  app-region: no-drag;
+}
+
+.window-control {
+  display: grid;
+  width: 17px;
+  height: 17px;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, black 22%, transparent);
+  border-radius: 999px;
+  padding: 0;
+  color: rgb(0 0 0 / 88%);
+  line-height: 1;
+  opacity: 0.95;
+  transition: transform 120ms ease, filter 120ms ease, opacity 120ms ease;
+}
+
+.window-control svg {
+  opacity: 0;
+  transform: scale(0.82);
+  transition: opacity 120ms ease, transform 120ms ease;
+}
+
+.window-control:hover,
+.window-control:focus-visible {
+  opacity: 1;
+}
+
+.window-control:hover svg,
+.window-control:focus-visible svg {
+  transform: scale(1);
+}
+
+.window-control:hover,
+.window-control:focus-visible {
+  transform: scale(1.06);
+  filter: brightness(1.08);
+  box-shadow: none;
+}
+
+.window-control.close {
+  background: #ff5f57;
+}
+
+.window-control.minimize {
+  background: #febc2e;
+}
+
+.window-control.maximize {
+  background: #28c840;
+}
+
 /* DnD styles (native HTML5) */
 .draggable-request {
   cursor: grab;
@@ -824,6 +944,23 @@ aside.panel {
 
 .draggable-request.dragging {
   opacity: 0.45;
+}
+
+.draggable-request.drop-request-before,
+.draggable-request.drop-request-after {
+  background: color-mix(in srgb, var(--primary) 10%, transparent) !important;
+}
+
+.draggable-request.drop-request-before {
+  box-shadow:
+    inset 0 2px 0 var(--primary),
+    inset 2px 0 0 var(--primary);
+}
+
+.draggable-request.drop-request-after {
+  box-shadow:
+    inset 0 -2px 0 var(--primary),
+    inset 2px 0 0 var(--primary);
 }
 
 .droppable-folder {

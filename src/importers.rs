@@ -1,6 +1,6 @@
 use crate::models::{
-    ApiKeyLocation, ApiRequest, Auth, Collection, CollectionFolder, FormField, Header, HttpMethod,
-    RequestBody, SavedRequest,
+    ApiKeyLocation, ApiRequest, Auth, Collection, CollectionFolder, FormField, FormFieldType,
+    Header, HttpMethod, RequestBody, SavedRequest,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -138,6 +138,7 @@ pub fn import_postman_collection(content: &str) -> ImportResult<ImportReport> {
             requests: ctx.requests,
             created_at: None,
             updated_at: None,
+            metadata: crate::models::Metadata::new(),
         },
         warnings: ctx.warnings,
         unsupported: ctx.unsupported,
@@ -217,6 +218,7 @@ pub fn import_openapi(content: &str) -> ImportResult<ImportReport> {
                         name: tag.to_string(),
                         parent_id: None,
                         sort_order: folders.len() as i32,
+                        metadata: crate::models::Metadata::new(),
                     });
                 }
                 id
@@ -285,6 +287,7 @@ pub fn import_openapi(content: &str) -> ImportResult<ImportReport> {
             requests,
             created_at: None,
             updated_at: None,
+            metadata: crate::models::Metadata::new(),
         },
         warnings,
         unsupported: Vec::new(),
@@ -306,6 +309,7 @@ fn import_postman_item(
             name: item.name,
             parent_id,
             sort_order: ctx.folders.len() as i32,
+            metadata: crate::models::Metadata::new(),
         });
         for child in children {
             import_postman_item(child, Some(folder_id.clone()), ctx)?;
@@ -383,7 +387,11 @@ fn postman_body_to_request_body(body: PostmanBody, ctx: &mut PostmanContext) -> 
                 .into_iter()
                 .map(|field| FormField {
                     key: field.key,
+                    field_type: FormFieldType::Text,
                     value: field.value.unwrap_or_default(),
+                    file_path: None,
+                    file_name: None,
+                    content_type: None,
                     enabled: !field.disabled.unwrap_or(false),
                 })
                 .collect(),
@@ -393,10 +401,33 @@ fn postman_body_to_request_body(body: PostmanBody, ctx: &mut PostmanContext) -> 
                 .formdata
                 .unwrap_or_default()
                 .into_iter()
-                .map(|field| FormField {
-                    key: field.key,
-                    value: field.value.unwrap_or_default(),
-                    enabled: !field.disabled.unwrap_or(false),
+                .map(|field| {
+                    let field_type = field
+                        .extra
+                        .get("type")
+                        .and_then(Value::as_str)
+                        .filter(|value| *value == "file")
+                        .map(|_| FormFieldType::File)
+                        .unwrap_or(FormFieldType::Text);
+                    let value = field.value.unwrap_or_default();
+                    FormField {
+                        key: field.key,
+                        field_type: field_type.clone(),
+                        value: if field_type == FormFieldType::Text {
+                            value.clone()
+                        } else {
+                            String::new()
+                        },
+                        file_path: (field_type == FormFieldType::File && !value.is_empty())
+                            .then_some(value),
+                        file_name: None,
+                        content_type: field
+                            .extra
+                            .get("contentType")
+                            .and_then(Value::as_str)
+                            .map(ToOwned::to_owned),
+                        enabled: !field.disabled.unwrap_or(false),
+                    }
                 })
                 .collect(),
         },
